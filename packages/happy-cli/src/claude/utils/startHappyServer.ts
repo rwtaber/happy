@@ -87,6 +87,12 @@ export async function startHappyServer(client: ApiSessionClient) {
 
     const server = createServer(async (req, res) => {
         try {
+            // Claude Code's HTTP MCP client doesn't send the Accept header
+            // required by StreamableHTTPServerTransport (needs both
+            // application/json and text/event-stream). Inject it for compatibility.
+            if (!req.headers.accept?.includes('text/event-stream')) {
+                req.headers.accept = 'application/json, text/event-stream';
+            }
             await transport.handleRequest(req, res);
         } catch (error) {
             logger.debug("Error handling request:", error);
