@@ -460,6 +460,7 @@ import { extractNoSandboxFlag } from './utils/sandboxFlags'
       const child = spawnHappyCLI(['daemon', 'start-sync'], {
         detached: true,
         stdio: 'ignore',
+        windowsHide: true,
         env: process.env
       });
       child.unref();

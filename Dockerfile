@@ -20,6 +20,7 @@ COPY packages/happy-agent/package.json packages/happy-agent/
 COPY packages/happy-wire/package.json packages/happy-wire/
 
 # Workspace postinstall requirements
+COPY patches ./patches
 COPY packages/happy-app/patches packages/happy-app/patches
 COPY packages/happy-server/prisma packages/happy-server/prisma
 COPY packages/happy-cli/scripts packages/happy-cli/scripts
@@ -51,7 +52,9 @@ COPY --from=builder /repo/node_modules /repo/node_modules
 COPY --from=builder /repo/packages/happy-wire /repo/packages/happy-wire
 COPY --from=builder /repo/packages/happy-server /repo/packages/happy-server
 
+RUN ln -s /repo/packages/happy-server/prisma /repo/prisma
+
 VOLUME /data
 EXPOSE 3005
 
-CMD ["sh", "-c", "node_modules/.bin/tsx packages/happy-server/sources/standalone.ts migrate && exec node_modules/.bin/tsx packages/happy-server/sources/standalone.ts serve"]
+CMD ["sh", "-c", "node_modules/.bin/tsx --tsconfig packages/happy-server/tsconfig.json packages/happy-server/sources/standalone.ts migrate && exec node_modules/.bin/tsx --tsconfig packages/happy-server/tsconfig.json packages/happy-server/sources/standalone.ts serve"]
