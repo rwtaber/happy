@@ -8,6 +8,8 @@ import type {
     ModelMode,
     PermissionModeKey,
     ModelModeKey,
+    EffortMode,
+    EffortModeKey,
 } from './modelModeOptions';
 
 export type {
@@ -15,6 +17,8 @@ export type {
     ModelMode,
     PermissionModeKey,
     ModelModeKey,
+    EffortMode,
+    EffortModeKey,
 } from './modelModeOptions';
 
 interface PermissionModeSelectorProps {

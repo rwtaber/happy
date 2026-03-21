@@ -28,6 +28,7 @@ export interface MobileMessageMeta {
   permissionMode?: string;
   /** Model name if applicable */
   model?: string | null;
+  effort?: string | null;
 }
 
 /**

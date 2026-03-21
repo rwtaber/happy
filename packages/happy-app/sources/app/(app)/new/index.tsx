@@ -26,6 +26,8 @@ import {
     getDefaultModelKey,
     getDefaultPermissionModeKey,
     resolveCurrentOption,
+    EffortMode,
+    getClaudeEffortModes,
 } from '@/components/modelModeOptions';
 import { AIBackendProfile, getProfileEnvironmentVariables, validateProfileForAgent } from '@/sync/settings';
 import { getBuiltInProfile, DEFAULT_PROFILES } from '@/sync/profileUtils';
@@ -292,6 +294,7 @@ function NewSessionWizard() {
     const useEnhancedSessionWizard = useSetting('useEnhancedSessionWizard');
     const lastUsedPermissionMode = useSetting('lastUsedPermissionMode');
     const lastUsedModelMode = useSetting('lastUsedModelMode');
+    const lastUsedEffortMode = useSetting('lastUsedEffortMode');
     const experimentsEnabled = useSetting('experiments');
     const [profiles, setProfiles] = useSettingMutable('profiles');
     const lastUsedProfile = useSetting('lastUsedProfile');
@@ -376,6 +379,14 @@ function NewSessionWizard() {
         ]);
     });
 
+    const effortModes = React.useMemo(() => getClaudeEffortModes(), []);
+    const [effortMode, setEffortMode] = React.useState<EffortMode | null>(() => {
+        return resolveCurrentOption(effortModes, [
+            lastUsedEffortMode,
+            'default',
+        ]);
+    });
+
     // Session details state
     const [selectedMachineId, setSelectedMachineId] = React.useState<string | null>(() => {
         if (machines.length > 0) {
@@ -400,6 +411,11 @@ function NewSessionWizard() {
     const handleModelModeChange = React.useCallback((mode: ModelMode) => {
         setModelMode(mode);
         sync.applySettings({ lastUsedModelMode: mode.key });
+    }, []);
+
+    const handleEffortModeChange = React.useCallback((mode: EffortMode) => {
+        setEffortMode(mode);
+        sync.applySettings({ lastUsedEffortMode: mode.key });
     }, []);
 
     //
@@ -1020,6 +1036,7 @@ function NewSessionWizard() {
                 lastUsedProfile: selectedProfileId,
                 lastUsedPermissionMode: permissionMode.key,
                 lastUsedModelMode: modelMode?.key ?? null,
+                lastUsedEffortMode: effortMode?.key ?? null,
             });
 
             // Get environment variables from selected profile
@@ -1050,6 +1067,9 @@ function NewSessionWizard() {
                 if (modelMode) {
                     storage.getState().updateSessionModelMode(result.sessionId, modelMode.key);
                 }
+                if (effortMode) {
+                    storage.getState().updateSessionEffortMode(result.sessionId, effortMode.key);
+                }
 
                 // Send initial message if provided
                 if (sessionPrompt.trim()) {
@@ -1077,7 +1097,7 @@ function NewSessionWizard() {
             Modal.alert(t('common.error'), errorMessage);
             setIsCreating(false);
         }
-    }, [selectedMachineId, selectedPath, sessionPrompt, sessionType, experimentsEnabled, agentType, selectedProfileId, permissionMode, modelMode, recentMachinePaths, profileMap, router]);
+    }, [selectedMachineId, selectedPath, sessionPrompt, sessionType, experimentsEnabled, agentType, selectedProfileId, permissionMode, modelMode, effortMode, recentMachinePaths, profileMap, router]);
 
     const screenWidth = useWindowDimensions().width;
 
@@ -1171,6 +1191,9 @@ function NewSessionWizard() {
                                 modelMode={modelMode}
                                 availableModels={availableModels}
                                 onModelModeChange={handleModelModeChange}
+                            effortMode={effortMode}
+                            effortModes={effortModes}
+                            onEffortModeChange={handleEffortModeChange}
                                 connectionStatus={connectionStatus}
                                 machineName={selectedMachine?.metadata?.displayName || selectedMachine?.metadata?.host}
                                 onMachineClick={handleMachineClick}
@@ -1922,6 +1945,9 @@ function NewSessionWizard() {
                             modelMode={modelMode}
                             availableModels={availableModels}
                             onModelModeChange={handleModelModeChange}
+                            effortMode={effortMode}
+                            effortModes={effortModes}
+                            onEffortModeChange={handleEffortModeChange}
                             connectionStatus={connectionStatus}
                             machineName={selectedMachine?.metadata?.displayName || selectedMachine?.metadata?.host}
                             onMachineClick={handleAgentInputMachineClick}

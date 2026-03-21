@@ -1,25 +1,29 @@
-import type { Session } from './storageTypes';
-import type { PermissionModeKey } from '@/components/PermissionModeSelector';
+import type { Session } from "./storageTypes";
+import type { PermissionModeKey } from "@/components/PermissionModeSelector";
 
-function isSandboxEnabled(metadata: Session['metadata'] | null | undefined): boolean {
+function isSandboxEnabled(metadata: Session["metadata"] | null | undefined): boolean {
     const sandbox = metadata?.sandbox;
-    return !!sandbox && typeof sandbox === 'object' && (sandbox as { enabled?: unknown }).enabled === true;
+    return !!sandbox && typeof sandbox === "object" && (sandbox as { enabled?: unknown }).enabled === true;
 }
 
 export function resolveMessageModeMeta(
-    session: Pick<Session, 'permissionMode' | 'modelMode' | 'metadata'>,
-): { permissionMode: PermissionModeKey; model: string | null } {
+    session: Pick<Session, "permissionMode" | "modelMode" | "effortMode" | "metadata">,
+): { permissionMode: PermissionModeKey; model: string | null; effort: string | null } {
     const sandboxEnabled = isSandboxEnabled(session.metadata);
     const permissionMode: PermissionModeKey =
-        session.permissionMode && session.permissionMode !== 'default'
+        session.permissionMode && session.permissionMode !== "default"
             ? session.permissionMode
-            : (sandboxEnabled ? 'bypassPermissions' : 'default');
+            : (sandboxEnabled ? "bypassPermissions" : "default");
 
-    const modelMode = session.modelMode || 'default';
-    const model = modelMode !== 'default' ? modelMode : null;
+    const modelMode = session.modelMode || "default";
+    const model = modelMode !== "default" ? modelMode : null;
+
+    const effortMode = session.effortMode || "default";
+    const effort = effortMode !== "default" ? effortMode : null;
 
     return {
         permissionMode,
         model,
+        effort,
     };
 }

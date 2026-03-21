@@ -6,6 +6,8 @@ import {
     getDefaultModelKey,
     getDefaultPermissionModeKey,
     resolveCurrentOption,
+    getClaudeEffortModes,
+    EffortMode,
 } from '@/components/modelModeOptions';
 import { getSuggestions } from '@/components/autocomplete/suggestions';
 import { ChatHeaderView } from '@/components/ChatHeaderView';
@@ -226,6 +228,18 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
         storage.getState().updateSessionModelMode(sessionId, mode.key);
     }, [sessionId]);
 
+    const effortModes = React.useMemo(() => getClaudeEffortModes(), []);
+    const effortMode = React.useMemo<EffortMode | null>(() => (
+        resolveCurrentOption(effortModes, [
+            session.effortMode,
+            'default',
+        ])
+    ), [effortModes, session.effortMode]);
+
+    const updateEffortMode = React.useCallback((mode: EffortMode) => {
+        storage.getState().updateSessionEffortMode(sessionId, mode.key);
+    }, [sessionId]);
+
     // Memoize header-dependent styles to prevent re-renders
     const headerDependentStyles = React.useMemo(() => ({
         contentContainer: {
@@ -309,6 +323,9 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
             modelMode={modelMode}
             availableModels={availableModels}
             onModelModeChange={updateModelMode}
+            effortMode={effortMode}
+            effortModes={effortModes}
+            onEffortModeChange={updateEffortMode}
             metadata={session.metadata}
             connectionStatus={{
                 text: sessionStatus.statusText,

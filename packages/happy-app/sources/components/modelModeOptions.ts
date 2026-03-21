@@ -76,6 +76,18 @@ export function getClaudeModelModes(): ModelMode[] {
         { key: 'opus', name: 'Opus', description: 'Most capable' },
     ];
 }
+export type EffortMode = ModeOption;
+export type EffortModeKey = string;
+
+export function getClaudeEffortModes(): EffortMode[] {
+    return [
+        { key: 'default', name: 'Default', description: 'Use CLI settings' },
+        { key: 'low', name: 'Low', description: 'Quick responses' },
+        { key: 'medium', name: 'Medium', description: 'Balanced' },
+        { key: 'high', name: 'High', description: 'Thorough' },
+        { key: 'max', name: 'Max', description: 'Maximum reasoning' },
+    ];
+}
 
 export function getCodexModelModes(translate: Translate): ModelMode[] {
     return [

@@ -454,7 +454,7 @@ class Sync {
             return;
         }
 
-        const { permissionMode, model } = resolveMessageModeMeta(session);
+        const { permissionMode, model, effort } = resolveMessageModeMeta(session);
 
         // Generate local ID
         const localId = randomUUID();
@@ -490,6 +490,7 @@ class Sync {
                 permissionMode,
                 model,
                 fallbackModel,
+                effort,
                 appendSystemPrompt: systemPrompt,
                 ...(displayText && { displayText }) // Add displayText if provided
             }
