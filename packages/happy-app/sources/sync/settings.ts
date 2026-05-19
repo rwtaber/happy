@@ -98,10 +98,10 @@ export const settingsDefaults: Settings = {
     showFlavorIcons: false,
 
     hideInactiveSessions: false,
-    expResumeSession: false,
+    expResumeSession: true,
     fileDiffsSidebar: false,
     groupToolCalls: false,
-    expImageUpload: false,
+    expImageUpload: true,
     reviewPromptAnswered: false,
     reviewPromptLikedApp: null,
     voiceAssistantLanguage: null,
