@@ -391,6 +391,7 @@ const ChatComposer = React.memo(function ChatComposer(props: ChatComposerProps) 
         getMessage: () => inputHandleRef.current?.getText() ?? '',
         clearMessage: () => {
             inputHandleRef.current?.setTextAndSelection('', { start: 0, end: 0 });
+            inputHandleRef.current?.focus();
             setMessage('');
             clearDraft();
         },
