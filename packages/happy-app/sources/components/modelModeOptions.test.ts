@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+    findOptionByKey,
     getAvailableModels,
     getAvailablePermissionModes,
+    getClaudeModelModes,
     getCodexModelModes,
     getClaudePermissionModes,
     getDefaultEffortKey,
@@ -49,10 +51,21 @@ describe('modelModeOptions', () => {
     it('uses code defaults for agent defaults', () => {
         expect(getDefaultPermissionModeKey('claude')).toBe('bypassPermissions');
         expect(getDefaultModelKey('claude')).toBe('opus');
-        expect(getDefaultEffortKey('claude')).toBe('medium');
+        expect(getDefaultEffortKey('claude')).toBe('max');
         expect(getDefaultPermissionModeKey('codex')).toBe('yolo');
         expect(getDefaultModelKey('codex')).toBe('gpt-5.5');
         expect(getDefaultEffortKey('codex')).toBe('medium');
+    });
+
+    it('exposes fable as the most capable claude model option', () => {
+        const models = getClaudeModelModes();
+        expect(models.map((model) => model.key)).toEqual(['default', 'fable', 'opus', 'sonnet', 'haiku']);
+    });
+
+    it('matches a legacy claude-fable-5 key to the fable picker option', () => {
+        const models = getClaudeModelModes();
+        expect(findOptionByKey(models, 'claude-fable-5')?.key).toBe('fable');
+        expect(findOptionByKey(models, 'fable')?.key).toBe('fable');
     });
 
     it('prefers metadata models over hardcoded fallbacks', () => {

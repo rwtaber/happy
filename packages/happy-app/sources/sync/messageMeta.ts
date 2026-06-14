@@ -1,6 +1,7 @@
 import type { Session } from './storageTypes';
 import type { Settings } from './settings';
 import { getAgentDefaultOverride } from './agentDefaults';
+import { resolveModelToSend } from './modelAliases';
 import type { PermissionModeKey } from '@/components/PermissionModeSelector';
 
 export type MessageModeMeta = {
@@ -24,7 +25,7 @@ export function resolveMessageModeMeta(
 
     const modelMode = session.modelMode ?? agentOverrides.modelMode;
     if (modelMode !== undefined) {
-        meta.model = modelMode === 'default' ? null : modelMode;
+        meta.model = modelMode === 'default' ? null : resolveModelToSend(modelMode);
     }
 
     const effort = session.effortLevel ?? agentOverrides.effortLevel;

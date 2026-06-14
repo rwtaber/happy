@@ -1,6 +1,7 @@
 import type { Metadata } from '@/sync/storageTypes';
 import { hackModes } from '@/sync/modeHacks';
 import { getCodeAgentDefaults } from '@/sync/agentDefaults';
+import { normalizeModelDisplayKey } from '@/sync/modelAliases';
 
 export type ModeOption = {
     key: string;
@@ -77,6 +78,7 @@ export function getGeminiPermissionModes(translate: Translate): PermissionMode[]
 export function getClaudeModelModes(): ModelMode[] {
     return [
         { key: 'default', name: 'default model', description: null },
+        { key: 'fable', name: 'fable 5', description: 'most capable' },
         { key: 'opus', name: 'opus 4.8', description: null },
         { key: 'sonnet', name: 'sonnet 4.6', description: null },
         { key: 'haiku', name: 'haiku 4.5', description: null },
@@ -175,7 +177,8 @@ export function findOptionByKey<T extends ModeOption>(options: T[], key: string 
     if (!key) {
         return null;
     }
-    return options.find((option) => option.key === key) ?? null;
+    const normalizedKey = normalizeModelDisplayKey(key);
+    return options.find((option) => option.key === normalizedKey) ?? null;
 }
 
 export function resolveCurrentOption<T extends ModeOption>(
