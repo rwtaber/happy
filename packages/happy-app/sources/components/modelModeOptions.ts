@@ -104,6 +104,14 @@ export function getGeminiModelModes(): ModelMode[] {
 }
 
 export function getOpenClawPermissionModes(translate: Translate): PermissionMode[] {
+    return buildDefaultPermissionModes(translate);
+}
+
+export function getCopilotPermissionModes(translate: Translate): PermissionMode[] {
+    return buildDefaultPermissionModes(translate);
+}
+
+function buildDefaultPermissionModes(translate: Translate): PermissionMode[] {
     return [
         { key: 'default', name: translate('agentInput.permissionMode.default'), description: null },
         { key: 'bypassPermissions', name: translate('agentInput.permissionMode.bypassPermissions'), description: null },
@@ -120,10 +128,21 @@ export function getHardcodedPermissionModes(flavor: AgentFlavor, translate: Tran
     if (flavor === 'openclaw') {
         return getOpenClawPermissionModes(translate);
     }
+    if (flavor === 'copilot') {
+        return getCopilotPermissionModes(translate);
+    }
     return getClaudePermissionModes(translate);
 }
 
 export function getOpenClawModelModes(): ModelMode[] {
+    return buildDefaultModelModes();
+}
+
+export function getCopilotModelModes(): ModelMode[] {
+    return buildDefaultModelModes();
+}
+
+function buildDefaultModelModes(): ModelMode[] {
     return [
         { key: 'default', name: 'default model', description: null },
     ];
@@ -138,6 +157,9 @@ export function getHardcodedModelModes(flavor: AgentFlavor, _translate: Translat
     }
     if (flavor === 'openclaw') {
         return getOpenClawModelModes();
+    }
+    if (flavor === 'copilot') {
+        return getCopilotModelModes();
     }
     return getClaudeModelModes();
 }
