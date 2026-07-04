@@ -323,10 +323,22 @@ describe('AcpSessionManager ignored messages', () => {
       { type: 'permission-response', id: 'p1', approved: true },
       { type: 'token-count', total: 1 },
       { type: 'fs-edit', description: 'edit' },
-      { type: 'terminal-output', data: 'stdout' },
     ];
 
     const envelopes = mapMany(mapper, messages);
+    expect(envelopes).toHaveLength(0);
+  });
+
+  it('maps terminal-output to a text envelope (Copilot intermediate output)', () => {
+    const mapper = new AcpSessionManager();
+    const envelopes = mapper.mapMessage({ type: 'terminal-output', data: 'stdout line\n' });
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0].ev).toEqual({ t: 'text', text: 'stdout line' });
+  });
+
+  it('ignores terminal-output that is only surrounding newlines', () => {
+    const mapper = new AcpSessionManager();
+    const envelopes = mapper.mapMessage({ type: 'terminal-output', data: '\n\n' });
     expect(envelopes).toHaveLength(0);
   });
 });
