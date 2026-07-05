@@ -36,12 +36,15 @@ export function parseResumeCommandArgs(args: string[]): { showHelp: boolean; ses
     };
 }
 
-function resolveFlavor(metadata: Metadata): 'codex' | 'claude' | null {
+function resolveFlavor(metadata: Metadata): 'codex' | 'claude' | 'copilot' | null {
     if (metadata.flavor === 'codex' || metadata.codexThreadId) {
         return 'codex';
     }
     if (metadata.flavor === 'claude' || metadata.claudeSessionId) {
         return 'claude';
+    }
+    if (metadata.flavor === 'copilot' || metadata.acpSessionId) {
+        return 'copilot';
     }
     return null;
 }
@@ -76,6 +79,21 @@ export function buildResumeLaunch(session: ResumableHappySession, options: Resum
             args.push('--started-by', options.startedBy);
         }
         args.push('--resume', metadata.claudeSessionId);
+        return {
+            cwd: metadata.path,
+            args,
+        };
+    }
+
+    if (flavor === 'copilot') {
+        if (!metadata.acpSessionId) {
+            throw new Error(`Happy session ${session.id} is missing its Copilot session ID.`);
+        }
+        const args = ['copilot'];
+        if (options.startedBy) {
+            args.push('--started-by', options.startedBy);
+        }
+        args.push('--resume', metadata.acpSessionId);
         return {
             cwd: metadata.path,
             args,

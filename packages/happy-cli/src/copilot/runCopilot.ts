@@ -37,6 +37,8 @@ export function assertCopilotInstalled(): void {
 export async function runCopilot(opts: {
     credentials: Credentials;
     startedBy?: 'daemon' | 'terminal';
+    /** Resume this existing Copilot ACP session id instead of starting fresh. */
+    resumeSessionId?: string;
 }): Promise<void> {
     assertCopilotInstalled();
 
@@ -46,5 +48,6 @@ export async function runCopilot(opts: {
         command: 'copilot',
         args: ['--acp'],
         startedBy: opts.startedBy,
+        resumeSessionId: opts.resumeSessionId,
     });
 }

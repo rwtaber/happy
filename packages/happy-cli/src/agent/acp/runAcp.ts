@@ -525,6 +525,8 @@ export async function runAcp(opts: {
   command: string;
   args: string[];
   startedBy?: 'daemon' | 'terminal';
+  /** Resume this existing agent session id instead of starting a new one. */
+  resumeSessionId?: string;
   verbose?: boolean;
 }): Promise<void> {
   const verbose = opts.verbose === true;
@@ -619,6 +621,7 @@ export async function runAcp(opts: {
     cwd: process.cwd(),
     command: opts.command,
     args: opts.args,
+    resumeSessionId: opts.resumeSessionId,
     mcpServers,
     permissionHandler,
     transportHandler: resolveTransportHandler(opts.agentName),
@@ -1026,6 +1029,13 @@ export async function runAcp(opts: {
     const started = await backend.startSession();
     finishStartupIndicator();
     acpSessionId = started.sessionId;
+    if (started.agentSessionId) {
+      // Persist the agent's own session id so `happy resume` can reload it.
+      session.updateMetadata((currentMetadata) => ({
+        ...currentMetadata,
+        acpSessionId: started.agentSessionId,
+      }));
+    }
     if (verbose) {
       if (!sawSlashCommands) {
         logAcp('muted', `Outgoing slash commands from ${opts.agentName}: not reported yet`);

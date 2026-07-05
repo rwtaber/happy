@@ -19,6 +19,8 @@ import {
   type InitializeRequest,
   type NewSessionRequest,
   type NewSessionResponse,
+  type LoadSessionRequest,
+  type LoadSessionResponse,
   type PromptRequest,
   type ContentBlock,
 } from '@agentclientprotocol/sdk';
@@ -194,6 +196,13 @@ export interface AcpBackendOptions {
 
   /** MCP servers to make available to the agent */
   mcpServers?: Record<string, McpServerConfig>;
+
+  /**
+   * When set and the agent advertises the ACP `loadSession` capability, resume
+   * this existing agent session instead of creating a new one. Falls back to a
+   * new session if resume is unsupported or fails.
+   */
+  resumeSessionId?: string;
 
   /** Optional permission handler for tool approval */
   permissionHandler?: AcpPermissionHandler;
@@ -381,6 +390,9 @@ export class AcpBackend implements AgentBackend {
 
   /** Whether the connected agent advertises MCP `http` transport support. */
   private agentSupportsHttpMcp = false;
+
+  /** Whether the connected agent advertises the ACP `loadSession` capability. */
+  private agentSupportsLoadSession = false;
 
   /** Track tool calls count since last prompt (to identify first tool call) */
   private toolCallCountSincePrompt = 0;
@@ -820,6 +832,10 @@ export class AcpBackend implements AgentBackend {
         agentCapabilities?: { mcpCapabilities?: { http?: boolean } };
       }).agentCapabilities?.mcpCapabilities?.http === true;
       logger.debug(`[AcpBackend] Agent MCP http support: ${this.agentSupportsHttpMcp}`);
+      this.agentSupportsLoadSession = (initializeResponse as {
+        agentCapabilities?: { loadSession?: boolean };
+      }).agentCapabilities?.loadSession === true;
+      logger.debug(`[AcpBackend] Agent loadSession support: ${this.agentSupportsLoadSession}`);
       if (this.options.verbose) {
         logAcpBackendMuted(
           `Incoming initialize response from ${this.options.agentName}: ${summarizeSessionMetadataPayload(initializeResponse)}`,
@@ -828,6 +844,74 @@ export class AcpBackend implements AgentBackend {
 
       // Create a new session with retry
       const mcpServers = buildAcpMcpServers(this.options.mcpServers, this.agentSupportsHttpMcp);
+
+      // Resume an existing agent session when requested and supported. On any
+      // failure we deliberately fall through to creating a new session, so resume
+      // can never leave the user worse off than starting fresh.
+      if (this.options.resumeSessionId && this.agentSupportsLoadSession) {
+        try {
+          logger.debug(`[AcpBackend] Loading existing session: ${this.options.resumeSessionId}`);
+          const loadRequest: LoadSessionRequest = {
+            sessionId: this.options.resumeSessionId,
+            cwd: this.options.cwd,
+            mcpServers: mcpServers as unknown as LoadSessionRequest['mcpServers'],
+          };
+          const loadResponse = await withRetry(
+            async () => {
+              let timeoutHandle: NodeJS.Timeout | null = null;
+              try {
+                return await Promise.race([
+                  startupFailurePromise,
+                  this.connection!.loadSession(loadRequest).then((res) => {
+                    if (timeoutHandle) {
+                      clearTimeout(timeoutHandle);
+                      timeoutHandle = null;
+                    }
+                    return res;
+                  }),
+                  new Promise<never>((_, reject) => {
+                    timeoutHandle = setTimeout(() => {
+                      reject(new Error(`Load session timeout after ${initTimeout}ms - ${this.transport.agentName} did not respond`));
+                    }, initTimeout);
+                  }),
+                ]);
+              } finally {
+                if (timeoutHandle) {
+                  clearTimeout(timeoutHandle);
+                }
+              }
+            },
+            {
+              operationName: 'LoadSession',
+              maxAttempts: RETRY_CONFIG.maxAttempts,
+              baseDelayMs: RETRY_CONFIG.baseDelayMs,
+              maxDelayMs: RETRY_CONFIG.maxDelayMs,
+              shouldRetry: (error) => !isNonRetryableStartupError(error),
+            }
+          );
+          this.acpSessionId = this.options.resumeSessionId;
+          logger.debug(`[AcpBackend] Resumed session: ${this.acpSessionId}`);
+          if (this.options.verbose) {
+            logAcpBackendMuted(
+              `Incoming loadSession response from ${this.options.agentName}: ${summarizeSessionMetadataPayload(loadResponse)}`,
+            );
+          }
+          this.emitInitialSessionMetadata(loadResponse);
+          this.emitIdleStatus();
+          if (initialPrompt) {
+            this.sendPrompt(sessionId, initialPrompt).catch((error) => {
+              logger.debug('[AcpBackend] Error sending initial prompt:', error);
+              this.emit({ type: 'status', status: 'error', detail: String(error) });
+            });
+          }
+          return { sessionId, agentSessionId: this.acpSessionId };
+        } catch (error) {
+          logger.warn(
+            `[AcpBackend] loadSession failed (${error instanceof Error ? error.message : String(error)}); creating a new session instead`,
+          );
+          // Fall through to newSession below.
+        }
+      }
 
       const newSessionRequest: NewSessionRequest = {
         cwd: this.options.cwd,
@@ -890,7 +974,7 @@ export class AcpBackend implements AgentBackend {
         });
       }
 
-      return { sessionId };
+      return { sessionId, agentSessionId: this.acpSessionId ?? undefined };
 
     } catch (error) {
       // Log to file only, not console
@@ -935,7 +1019,9 @@ export class AcpBackend implements AgentBackend {
     };
   }
 
-  private emitInitialSessionMetadata(sessionResponse: NewSessionResponse): void {
+  private emitInitialSessionMetadata(
+    sessionResponse: Pick<NewSessionResponse, 'configOptions' | 'models' | 'modes'>,
+  ): void {
     if (Array.isArray(sessionResponse.configOptions)) {
       this.emit({
         type: 'event',
