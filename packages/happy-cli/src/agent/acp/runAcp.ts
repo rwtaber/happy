@@ -381,7 +381,9 @@ function isBypassPermissionMode(mode: string): boolean {
  * explicit mode from a user message overrides it before the prompt is sent.
  */
 const DEFAULT_INITIAL_PERMISSION_MODE: Record<string, string | undefined> = {
-  copilot: 'bypassPermissions',
+  // Autopilot = Copilot's allow-all/auto-run operating mode; applied on the first
+  // turn when the composer sends no explicit mode, so allow-all works immediately.
+  copilot: 'https://agentclientprotocol.com/protocol/session-modes#autopilot',
 };
 
 function resolveRequestedCode(options: AcpSelectableOption[], requested: string): string | null {

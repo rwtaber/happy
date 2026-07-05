@@ -107,8 +107,20 @@ export function getOpenClawPermissionModes(translate: Translate): PermissionMode
     return buildDefaultPermissionModes(translate);
 }
 
-export function getCopilotPermissionModes(translate: Translate): PermissionMode[] {
-    return buildDefaultPermissionModes(translate);
+// Copilot exposes its operating modes as ACP session-mode ids. These mirror what
+// a live session reports via metadata.operatingModes, so the new-session composer
+// (which has no live metadata yet) shows the SAME options as an active session.
+const COPILOT_SESSION_MODE_BASE = 'https://agentclientprotocol.com/protocol/session-modes#';
+export const COPILOT_MODE_AGENT = `${COPILOT_SESSION_MODE_BASE}agent`;
+export const COPILOT_MODE_PLAN = `${COPILOT_SESSION_MODE_BASE}plan`;
+export const COPILOT_MODE_AUTOPILOT = `${COPILOT_SESSION_MODE_BASE}autopilot`;
+
+export function getCopilotPermissionModes(_translate: Translate): PermissionMode[] {
+    return [
+        { key: COPILOT_MODE_AGENT, name: 'Agent', description: 'Default agent mode for conversational interactions' },
+        { key: COPILOT_MODE_PLAN, name: 'Plan', description: 'Plan mode for creating and executing multi-step plans' },
+        { key: COPILOT_MODE_AUTOPILOT, name: 'Autopilot', description: 'Autonomous mode that enables allow-all and runs until task completion (experimental)' },
+    ];
 }
 
 function buildDefaultPermissionModes(translate: Translate): PermissionMode[] {

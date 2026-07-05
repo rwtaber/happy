@@ -36,7 +36,9 @@ const codeAgentDefaults: Record<AgentKey, AgentDefaultConfig> = {
     openclaw: { permissionMode: 'default', modelMode: 'default', effortLevel: null },
     // Copilot picks its model server-side ('auto'); default to bypass permissions
     // so remote sessions run without prompting, matching Claude/Codex defaults.
-    copilot: { permissionMode: 'bypassPermissions', modelMode: 'auto', effortLevel: 'medium' },
+    // Default to Autopilot (Copilot's allow-all/auto-run operating mode). The value
+    // is the ACP session-mode id so it matches metadata.operatingModes in-session.
+    copilot: { permissionMode: 'https://agentclientprotocol.com/protocol/session-modes#autopilot', modelMode: 'auto', effortLevel: 'medium' },
 };
 
 export function normalizeAgentKey(flavor: string | null | undefined): AgentKey {

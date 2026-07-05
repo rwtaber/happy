@@ -709,4 +709,58 @@ describe('runAcp', () => {
     expect(mocks.backendState.setModeCalls).toEqual([]);
     expect(mocks.backendState.setModelCalls).toEqual([]);
   });
+
+  it('applies Copilot autopilot mode on the first turn when no explicit permission mode is sent', async () => {
+    const AUTOPILOT = 'https://agentclientprotocol.com/protocol/session-modes#autopilot';
+    mocks.backendState.startSessionMessages = [
+      {
+        type: 'event',
+        name: 'config_options_update',
+        payload: {
+          configOptions: [
+            {
+              type: 'select',
+              id: 'mode',
+              name: 'Mode',
+              category: 'mode',
+              currentValue: 'https://agentclientprotocol.com/protocol/session-modes#agent',
+              options: [
+                { value: 'https://agentclientprotocol.com/protocol/session-modes#agent', name: 'Agent' },
+                { value: 'https://agentclientprotocol.com/protocol/session-modes#plan', name: 'Plan' },
+                { value: AUTOPILOT, name: 'Autopilot' },
+              ],
+            },
+          ],
+        },
+      },
+    ];
+
+    const runPromise = runAcp({
+      credentials: { token: 'token', encryption: { type: 'legacy', secret: new Uint8Array(32) } },
+      agentName: 'copilot',
+      command: 'copilot',
+      args: ['--acp'],
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.getUserMessageHandler()).toBeTypeOf('function');
+    });
+
+    // No meta at all — the composer omits permissionMode when it equals the default.
+    mocks.getUserMessageHandler()!({
+      role: 'user',
+      content: { type: 'text', text: 'do it' },
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.backendState.prompts).toHaveLength(1);
+    });
+
+    await mocks.getKillHandler()!();
+    await runPromise;
+
+    expect(mocks.backendState.setConfigOptionCalls).toEqual([
+      { configId: 'mode', value: AUTOPILOT },
+    ]);
+  });
 });
