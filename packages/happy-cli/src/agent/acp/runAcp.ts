@@ -354,6 +354,21 @@ function normalizeComparable(value: string): string {
   return value.trim().toLowerCase();
 }
 
+const BYPASS_PERMISSION_MODES = new Set(['yolo', 'bypasspermissions', 'safe-yolo', 'dontask', 'allow-all', 'allowall']);
+
+/**
+ * Whether a requested permission mode means "run tools without asking".
+ * Covers Happy's cross-agent mode names (yolo/bypassPermissions/safe-yolo/...)
+ * and ACP autopilot mode ids, which enable allow-all.
+ */
+function isBypassPermissionMode(mode: string): boolean {
+  const normalized = normalizeComparable(mode);
+  if (BYPASS_PERMISSION_MODES.has(normalized)) {
+    return true;
+  }
+  return normalized.includes('autopilot') || normalized.includes('bypass') || normalized.includes('yolo');
+}
+
 function resolveRequestedCode(options: AcpSelectableOption[], requested: string): string | null {
   for (const option of options) {
     if (option.code === requested || option.value === requested) {
@@ -407,6 +422,7 @@ function resolveRequestedLegacyModelCode(models: SessionModelState, requested: s
 
 class GenericAcpPermissionHandler extends BasePermissionHandler implements AcpPermissionHandler {
   private readonly logPrefix: string;
+  private autoApprove = false;
 
   constructor(session: ApiSessionClient, agentName: string) {
     super(session);
@@ -417,7 +433,18 @@ class GenericAcpPermissionHandler extends BasePermissionHandler implements AcpPe
     return this.logPrefix;
   }
 
+  setAutoApprove(value: boolean): void {
+    if (this.autoApprove !== value) {
+      logger.debug(`${this.logPrefix} Auto-approve tool permissions: ${value}`);
+    }
+    this.autoApprove = value;
+  }
+
   async handleToolCall(toolCallId: string, toolName: string, input: unknown): Promise<PermissionResult> {
+    if (this.autoApprove) {
+      logger.debug(`${this.logPrefix} Auto-approving tool ${toolName} (${toolCallId}); permission prompts bypassed`);
+      return { decision: 'approved' };
+    }
     return new Promise<PermissionResult>((resolve, reject) => {
       this.pendingRequests.set(toolCallId, {
         resolve,
@@ -613,6 +640,11 @@ export async function runAcp(opts: {
     if (!requestedMode) {
       return;
     }
+
+    // Honor Happy's bypass/yolo permission modes even when the ACP agent does
+    // not advertise a matching operating mode: auto-approve tool permission
+    // requests locally so the agent runs without prompting.
+    permissionHandler.setAutoApprove(isBypassPermissionMode(requestedMode));
 
     if (modeSelector) {
       const resolved = resolveRequestedCode(modeSelector.options, requestedMode);

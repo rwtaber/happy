@@ -42,7 +42,19 @@ export function normalizeAgentKey(flavor: string | null | undefined): AgentKey {
     return 'claude';
 }
 
+// Copilot is not part of agentKeys (no persisted overrides UI yet), so define
+// its defaults separately instead of letting normalizeAgentKey() fall back to
+// Claude's (which yields the invalid model 'opus' for Copilot sessions).
+const copilotDefaults: AgentDefaultConfig = {
+    permissionMode: 'bypassPermissions',
+    modelMode: 'auto',
+    effortLevel: null,
+};
+
 export function getCodeAgentDefaults(flavor: string | null | undefined): AgentDefaultConfig {
+    if (flavor === 'copilot') {
+        return copilotDefaults;
+    }
     return codeAgentDefaults[normalizeAgentKey(flavor)];
 }
 
@@ -50,6 +62,9 @@ export function getAgentDefaultOverride(
     overrides: AgentDefaultOverrides | null | undefined,
     flavor: string | null | undefined,
 ): AgentDefaultOverride {
+    if (flavor === 'copilot') {
+        return {};
+    }
     return overrides?.[normalizeAgentKey(flavor)] ?? {};
 }
 

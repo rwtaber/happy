@@ -139,7 +139,23 @@ export function getOpenClawModelModes(): ModelMode[] {
 }
 
 export function getCopilotModelModes(): ModelMode[] {
-    return buildDefaultModelModes();
+    // Fallback list shown before a live ACP session reports metadata.models
+    // (e.g. in the new-session composer). Once the session starts, the real
+    // list from metadata.models takes over via getAvailableModels().
+    return [
+        { key: 'auto', name: 'auto', description: 'let Copilot pick the best model' },
+        { key: 'claude-sonnet-5', name: 'Claude Sonnet 5', description: null },
+        { key: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6', description: null },
+        { key: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', description: null },
+        { key: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', description: 'fast & efficient' },
+        { key: 'claude-opus-4.8', name: 'Claude Opus 4.8', description: 'most capable' },
+        { key: 'gpt-5.5', name: 'GPT-5.5', description: null },
+        { key: 'gpt-5.4', name: 'GPT-5.4', description: null },
+        { key: 'gpt-5.3-codex', name: 'GPT-5.3-Codex', description: null },
+        { key: 'gpt-5.4-mini', name: 'GPT-5.4 mini', description: null },
+        { key: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', description: null },
+        { key: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', description: null },
+    ];
 }
 
 function buildDefaultModelModes(): ModelMode[] {
