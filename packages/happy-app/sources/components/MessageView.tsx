@@ -206,7 +206,8 @@ function AgentTextBlock(props: {
 
 function ThinkingBlock(props: { text: string }) {
   const { theme } = useUnistyles();
-  const [expanded, setExpanded] = React.useState(false);
+  // Expanded by default so the reasoning is visible without a tap.
+  const [expanded, setExpanded] = React.useState(true);
   // The reducer wraps thinking text in asterisks (legacy italic rendering);
   // strip them so multi-line reasoning renders cleanly in the disclosure.
   const text = props.text.replace(/^\*+/, '').replace(/\*+$/, '').trim();
