@@ -337,6 +337,9 @@ export class AcpBackend implements AgentBackend {
   /** Track if we just sent a prompt with change_title instruction */
   private recentPromptHadChangeTitle = false;
 
+  /** Whether the connected agent advertises MCP `http` transport support. */
+  private agentSupportsHttpMcp = false;
+
   /** Track tool calls count since last prompt (to identify first tool call) */
   private toolCallCountSincePrompt = 0;
   /** Timeout for emitting 'idle' status after last message chunk */
@@ -771,6 +774,10 @@ export class AcpBackend implements AgentBackend {
         }
       );
       logger.debug(`[AcpBackend] Initialize completed`);
+      this.agentSupportsHttpMcp = (initializeResponse as {
+        agentCapabilities?: { mcpCapabilities?: { http?: boolean } };
+      }).agentCapabilities?.mcpCapabilities?.http === true;
+      logger.debug(`[AcpBackend] Agent MCP http support: ${this.agentSupportsHttpMcp}`);
       if (this.options.verbose) {
         logAcpBackendMuted(
           `Incoming initialize response from ${this.options.agentName}: ${summarizeSessionMetadataPayload(initializeResponse)}`,
@@ -778,15 +785,35 @@ export class AcpBackend implements AgentBackend {
       }
 
       // Create a new session with retry
+      // Choose the MCP transport per server based on what the agent supports.
+      // Prefer HTTP when the server exposes a URL and the agent advertises http
+      // support (e.g. Copilot only supports http/sse, never stdio); otherwise
+      // fall back to the stdio command.
       const mcpServers = this.options.mcpServers
-        ? Object.entries(this.options.mcpServers).map(([name, config]) => ({
-            name,
-            command: config.command,
-            args: config.args || [],
-            env: config.env
-              ? Object.entries(config.env).map(([envName, envValue]) => ({ name: envName, value: envValue }))
-              : [],
-          }))
+        ? Object.entries(this.options.mcpServers).flatMap(([name, config]): Array<Record<string, unknown>> => {
+            if (config.url && this.agentSupportsHttpMcp) {
+              return [{
+                type: 'http',
+                name,
+                url: config.url,
+                headers: config.headers
+                  ? Object.entries(config.headers).map(([hName, hValue]) => ({ name: hName, value: hValue }))
+                  : [],
+              }];
+            }
+            if (config.command) {
+              return [{
+                name,
+                command: config.command,
+                args: config.args || [],
+                env: config.env
+                  ? Object.entries(config.env).map(([envName, envValue]) => ({ name: envName, value: envValue }))
+                  : [],
+              }];
+            }
+            logger.debug(`[AcpBackend] Skipping MCP server "${name}": agent http support=${this.agentSupportsHttpMcp}, no stdio command`);
+            return [];
+          })
         : [];
 
       const newSessionRequest: NewSessionRequest = {

@@ -247,10 +247,17 @@ describe('runAcp', () => {
 
     expect(mocks.backendState.constructorArgs.command).toBe('opencode');
     expect(mocks.backendState.constructorArgs.args).toEqual(['--acp']);
-    expect(mocks.backendState.prompts[0]).toEqual({
-      sessionId: 'acp-session-1',
-      prompt: 'Build a test plan',
-    });
+    // The happy MCP server is passed with BOTH a native http url (used by
+    // agents that support MCP http, e.g. Copilot) and a stdio bridge command
+    // (fallback for stdio-only agents). AcpBackend picks per agent capability.
+    expect(typeof mocks.backendState.constructorArgs.mcpServers.happy.url).toBe('string');
+    expect(typeof mocks.backendState.constructorArgs.mcpServers.happy.command).toBe('string');
+    expect(typeof mocks.backendState.constructorArgs.hasChangeTitleInstruction).toBe('function');
+    // The first prompt of a session carries the user's message plus the
+    // appended change_title instruction (so the agent names the conversation).
+    expect(mocks.backendState.prompts[0].sessionId).toBe('acp-session-1');
+    expect(mocks.backendState.prompts[0].prompt).toContain('Build a test plan');
+    expect(mocks.backendState.prompts[0].prompt).toContain('change_title');
 
     const envelopeTypes = mocks.mockSession.sendSessionProtocolMessage.mock.calls.map(([envelope]) => envelope.ev.t);
     expect(envelopeTypes).toEqual(['turn-start', 'text', 'tool-call-start', 'tool-call-end', 'turn-end']);

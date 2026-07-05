@@ -18,6 +18,7 @@ import { setupOfflineReconnection } from '@/utils/setupOfflineReconnection';
 import { notifyDaemonSessionStarted } from '@/daemon/controlClient';
 import { encodeBase64 } from '@/api/encryption';
 import { registerKillSessionHandler } from '@/claude/registerKillSessionHandler';
+import { trimIdent } from '@/utils/trimIdent';
 import { startHappyServer } from '@/claude/utils/startHappyServer';
 import { projectPath } from '@/projectPath';
 import { BasePermissionHandler, type PermissionResult } from '@/utils/BasePermissionHandler';
@@ -32,6 +33,15 @@ import {
 import type { SessionConfigOption, SessionModeState, SessionModelState } from '@agentclientprotocol/sdk';
 
 const TURN_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Appended to the first user prompt of an ACP session so the agent names the
+ * chat via the happy MCP server's `change_title` tool (mirrors how Claude/Codex/
+ * Gemini instruct their agents to rename the conversation).
+ */
+const ACP_CHANGE_TITLE_INSTRUCTION = trimIdent(`
+  When you start working on this chat, call the "change_title" tool (provided by the "happy" MCP server) to set a short, descriptive title that represents the task. If the topic changes significantly later, call it again to update the title.
+`);
 const ACP_EVENT_PREVIEW_CHARS = 240;
 const ACP_RAW_PREVIEW_CHARS = 2000;
 const ACP_COLOR_RESET = '\u001b[0m';
@@ -588,6 +598,9 @@ export async function runAcp(opts: {
   const happyServer = await startHappyServer(session);
   const mcpServers = {
     happy: {
+      // Native HTTP endpoint: used for agents that advertise MCP http support
+      // (e.g. Copilot). Agents that only support stdio use the bridge command.
+      url: happyServer.url,
       command: join(projectPath(), 'bin', 'happy-mcp.mjs'),
       args: ['--url', happyServer.url],
     },
@@ -601,8 +614,11 @@ export async function runAcp(opts: {
     mcpServers,
     permissionHandler,
     transportHandler: resolveTransportHandler(opts.agentName),
+    hasChangeTitleInstruction: (prompt: string) => prompt.includes('change_title'),
     verbose,
   });
+
+  let isFirstPrompt = true;
 
   let thinking = false;
   let acpSessionId: string | null = null;
@@ -1020,7 +1036,11 @@ export async function runAcp(opts: {
           await switchEffortIfRequested(batch.mode.effort);
         }
         if (batch.message) {
-          await backend.sendPrompt(acpSessionId, batch.message);
+          const promptText = isFirstPrompt
+            ? `${batch.message}\n\n${ACP_CHANGE_TITLE_INSTRUCTION}`
+            : batch.message;
+          isFirstPrompt = false;
+          await backend.sendPrompt(acpSessionId, promptText);
           await turnEnded;
         }
         sendEnvelopes(sessionManager.endTurn('completed'));
