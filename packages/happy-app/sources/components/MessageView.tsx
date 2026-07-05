@@ -1,6 +1,6 @@
 import * as React from "react";
 import { View, Text, Pressable, Platform } from "react-native";
-import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { StyleSheet } from 'react-native-unistyles';
 import { Ionicons } from '@expo/vector-icons';
 import { MarkdownView } from "./markdown/MarkdownView";
 import { t } from '@/text';
@@ -63,7 +63,7 @@ function RenderBlock(props: {
       );
 
     case 'agent-text':
-      return <AgentTextBlock message={props.message} sessionId={props.sessionId} metadata={props.metadata} />;
+      return <AgentTextBlock message={props.message} sessionId={props.sessionId} />;
 
     case 'tool-call':
       return <ToolCallBlock
@@ -179,60 +179,19 @@ function UserTextBlock(props: {
 function AgentTextBlock(props: {
   message: AgentTextMessage;
   sessionId: string;
-  metadata: Metadata | null;
 }) {
   const handleOptionPress = React.useCallback((option: Option) => {
     sync.sendMessage(props.sessionId, option.title, { source: 'option' });
   }, [props.sessionId]);
 
-  // Thinking / chain-of-thought messages.
+  // Hide thinking messages
   if (props.message.isThinking) {
-    // Copilot streams its inner dialogue as thinking; surface it in a
-    // collapsed "Thinking…" disclosure so users get progress feedback during
-    // its long reasoning/tool gaps. Other agents keep the previous hidden
-    // behavior.
-    if (props.metadata?.flavor === 'copilot') {
-      return <ThinkingBlock text={props.message.text} />;
-    }
     return null;
   }
 
   return (
     <View style={styles.agentMessageContainer}>
       <MarkdownView markdown={props.message.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
-    </View>
-  );
-}
-
-function ThinkingBlock(props: { text: string }) {
-  const { theme } = useUnistyles();
-  const [expanded, setExpanded] = React.useState(false);
-  // The reducer wraps thinking text in asterisks (legacy italic rendering);
-  // strip them so multi-line reasoning renders cleanly in the disclosure.
-  const text = props.text.replace(/^\*+/, '').replace(/\*+$/, '').trim();
-  if (!text) {
-    return null;
-  }
-  return (
-    <View style={styles.thinkingContainer}>
-      <Pressable
-        onPress={() => setExpanded((value) => !value)}
-        style={({ pressed }) => [styles.thinkingToggle, pressed && styles.thinkingTogglePressed]}
-        hitSlop={8}
-      >
-        <Ionicons name="bulb-outline" size={14} color={theme.colors.textSecondary} />
-        <Text style={styles.thinkingToggleText} numberOfLines={1}>{t('message.thinking')}</Text>
-        <Ionicons
-          name={expanded ? 'chevron-down' : 'chevron-forward'}
-          size={14}
-          color={theme.colors.textSecondary}
-        />
-      </Pressable>
-      {expanded ? (
-        <View style={styles.thinkingContent}>
-          <Text style={styles.thinkingText} selectable>{text}</Text>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -306,35 +265,6 @@ const styles = StyleSheet.create((theme) => ({
   messageContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-  },
-  thinkingContainer: {
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  thinkingToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 4,
-    alignSelf: 'flex-start',
-  },
-  thinkingTogglePressed: {
-    opacity: 0.6,
-  },
-  thinkingToggleText: {
-    color: theme.colors.textSecondary,
-    fontSize: 13,
-    fontStyle: 'italic',
-  },
-  thinkingContent: {
-    marginTop: 4,
-    paddingLeft: 20,
-  },
-  thinkingText: {
-    color: theme.colors.textSecondary,
-    fontSize: 13,
-    lineHeight: 18,
-    fontStyle: 'italic',
   },
   messageContent: {
     flexDirection: 'column',
