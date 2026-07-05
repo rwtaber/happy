@@ -312,6 +312,48 @@ async function withRetry<T>(
 }
 
 /**
+ * Build the ACP `mcpServers` payload from Happy's MCP server configs, choosing a
+ * transport per server. Prefers HTTP when the server exposes a `url` and the
+ * connected agent advertises MCP `http` support (e.g. Copilot only supports
+ * http/sse, never stdio); otherwise falls back to the stdio `command`. Servers
+ * with neither a usable HTTP endpoint nor a stdio command are skipped.
+ *
+ * Exported so the transport-selection logic can be unit-tested in isolation.
+ */
+export function buildAcpMcpServers(
+  mcpServers: Record<string, McpServerConfig> | undefined,
+  agentSupportsHttpMcp: boolean,
+): Array<Record<string, unknown>> {
+  if (!mcpServers) {
+    return [];
+  }
+  return Object.entries(mcpServers).flatMap(([name, config]): Array<Record<string, unknown>> => {
+    if (config.url && agentSupportsHttpMcp) {
+      return [{
+        type: 'http',
+        name,
+        url: config.url,
+        headers: config.headers
+          ? Object.entries(config.headers).map(([hName, hValue]) => ({ name: hName, value: hValue }))
+          : [],
+      }];
+    }
+    if (config.command) {
+      return [{
+        name,
+        command: config.command,
+        args: config.args || [],
+        env: config.env
+          ? Object.entries(config.env).map(([envName, envValue]) => ({ name: envName, value: envValue }))
+          : [],
+      }];
+    }
+    logger.debug(`[AcpBackend] Skipping MCP server "${name}": agent http support=${agentSupportsHttpMcp}, no stdio command`);
+    return [];
+  });
+}
+
+/**
  * ACP backend using the official @agentclientprotocol/sdk
  */
 export class AcpBackend implements AgentBackend {
@@ -785,36 +827,7 @@ export class AcpBackend implements AgentBackend {
       }
 
       // Create a new session with retry
-      // Choose the MCP transport per server based on what the agent supports.
-      // Prefer HTTP when the server exposes a URL and the agent advertises http
-      // support (e.g. Copilot only supports http/sse, never stdio); otherwise
-      // fall back to the stdio command.
-      const mcpServers = this.options.mcpServers
-        ? Object.entries(this.options.mcpServers).flatMap(([name, config]): Array<Record<string, unknown>> => {
-            if (config.url && this.agentSupportsHttpMcp) {
-              return [{
-                type: 'http',
-                name,
-                url: config.url,
-                headers: config.headers
-                  ? Object.entries(config.headers).map(([hName, hValue]) => ({ name: hName, value: hValue }))
-                  : [],
-              }];
-            }
-            if (config.command) {
-              return [{
-                name,
-                command: config.command,
-                args: config.args || [],
-                env: config.env
-                  ? Object.entries(config.env).map(([envName, envValue]) => ({ name: envName, value: envValue }))
-                  : [],
-              }];
-            }
-            logger.debug(`[AcpBackend] Skipping MCP server "${name}": agent http support=${this.agentSupportsHttpMcp}, no stdio command`);
-            return [];
-          })
-        : [];
+      const mcpServers = buildAcpMcpServers(this.options.mcpServers, this.agentSupportsHttpMcp);
 
       const newSessionRequest: NewSessionRequest = {
         cwd: this.options.cwd,
