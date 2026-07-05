@@ -34,6 +34,15 @@ export class CopilotTransport extends DefaultTransport {
   getIdleTimeout(): number {
     return COPILOT_TIMEOUTS.idle;
   }
+
+  /**
+   * Copilot's ACP server resolves `session/prompt` only after the turn's
+   * updates have been sent, so the turn can end deterministically on
+   * resolution rather than waiting for the idle chunk-gap heuristic.
+   */
+  endsTurnOnPromptResolution(): boolean {
+    return true;
+  }
 }
 
 export const copilotTransport = new CopilotTransport();

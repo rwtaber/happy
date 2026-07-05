@@ -106,11 +106,23 @@ avoid the session looking dead, `runAcp` marks the session busy during startup
 and posts a one-time "starting up" notice
 (`ACP_SLOW_STARTUP_NOTICE_MS`).
 
+## Turn completion
+
+Copilot ends turns deterministically: `AcpBackend.sendPrompt` treats the ACP
+`session/prompt` response (and its `stopReason`) as the authoritative
+end-of-turn, since a compliant agent sends it only after every `session/update`
+for the turn. This is opt-in per transport via
+`CopilotTransport.endsTurnOnPromptResolution()`, so turns end as soon as Copilot
+finishes rather than after a fixed idle gap. The 2s idle chunk-gap heuristic
+(`CopilotTransport.idle`) remains as a fallback for turns where `prompt()`
+resolves late or not at all. Transports that do not opt in (Gemini/OpenCode)
+keep the heuristic-only behavior.
+
 ## Known limitations
 
-- **Turn completion is heuristic.** `AcpBackend.sendPrompt` awaits
-  `connection.prompt()` but does not yet use its `stopReason`; turn-end is
-  inferred from a 2s idle chunk-gap (`CopilotTransport.idle`). This is why the
-  stop button can be less responsive than with Claude.
+- **Stop button responsiveness.** Cancelling mid-turn relies on the agent
+  acknowledging the ACP `cancel` and resolving the in-flight `prompt()`; the
+  deterministic turn-end above ends the turn cleanly, but cancel latency still
+  depends on the agent.
 
-These are tracked as follow-up work in the integration plan.
+Remaining enhancements are tracked in the integration plan.

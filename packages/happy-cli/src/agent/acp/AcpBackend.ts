@@ -1242,11 +1242,25 @@ export class AcpBackend implements AgentBackend {
       };
 
       logger.debug(`[AcpBackend] Prompt request:`, JSON.stringify(promptRequest, null, 2));
-      await this.connection.prompt(promptRequest);
-      logger.debug('[AcpBackend] Prompt request sent to ACP connection');
-      
-      // Don't emit 'idle' here - it will be emitted after all message chunks are received
-      // The idle timeout in handleSessionUpdate will emit 'idle' after the last chunk
+      const promptResponse = await this.connection.prompt(promptRequest);
+      const stopReason = (promptResponse as { stopReason?: string } | undefined)?.stopReason;
+      logger.debug(`[AcpBackend] Prompt resolved (stopReason: ${stopReason ?? 'unknown'})`);
+
+      // The ACP prompt() response is the authoritative end-of-turn signal: a
+      // compliant agent sends it only after every session/update for the turn.
+      // For transports that opt in (e.g. Copilot), end the turn deterministically
+      // here instead of waiting for the ~2s idle chunk-gap heuristic. The heuristic
+      // remains the fallback for agents that resolve prompt() late or not at all,
+      // and transports that do not opt in keep their previous behavior. A
+      // 'cancelled' stopReason is left to the cancel() path, which emits 'stopped'.
+      if (this.transport.endsTurnOnPromptResolution?.() && stopReason !== 'cancelled') {
+        if (this.idleTimeout) {
+          clearTimeout(this.idleTimeout);
+          this.idleTimeout = null;
+        }
+        this.waitingForResponse = false;
+        this.emitIdleStatus();
+      }
 
     } catch (error) {
       logger.debug('[AcpBackend] Error sending prompt:', error);
