@@ -35,6 +35,14 @@ import type { SessionConfigOption, SessionModeState, SessionModelState } from '@
 const TURN_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
+ * How long an ACP session may take to start before we post a one-time notice.
+ * Startup can be slow when the workspace has many custom agents/skills/
+ * instructions or heavy MCP servers to load (worse on network mounts), during
+ * which the user's first message waits in the queue.
+ */
+const ACP_SLOW_STARTUP_NOTICE_MS = 8_000;
+
+/**
  * Appended to the first user prompt of an ACP session so the agent names the
  * chat via the happy MCP server's `change_title` tool (mirrors how Claude/Codex/
  * Gemini instruct their agents to rename the conversation).
@@ -990,8 +998,33 @@ export async function runAcp(opts: {
     await handleAbort();
   });
 
+  // Show the session as busy while the ACP agent starts, and post a one-time
+  // notice if startup runs long — otherwise a slow-to-initialize workspace
+  // (large repo, many agents/skills, heavy MCP servers) looks unresponsive
+  // while the user's first message sits queued behind startSession().
+  let startupIndicatorActive = true;
+  thinking = true;
+  session.keepAlive(true, 'remote');
+  const slowStartupNotice = setTimeout(() => {
+    logAcp('muted', `Still starting ${opts.agentName} session (loading workspace)...`);
+    session.sendSessionEvent({
+      type: 'message',
+      message: `Starting the ${opts.agentName} session — loading workspace configuration. This can take a while for large repositories or ones with many agents, skills, or MCP servers.`,
+    });
+  }, ACP_SLOW_STARTUP_NOTICE_MS);
+  const finishStartupIndicator = () => {
+    if (!startupIndicatorActive) {
+      return;
+    }
+    startupIndicatorActive = false;
+    clearTimeout(slowStartupNotice);
+    thinking = false;
+    session.keepAlive(false, 'remote');
+  };
+
   try {
     const started = await backend.startSession();
+    finishStartupIndicator();
     acpSessionId = started.sessionId;
     if (verbose) {
       if (!sawSlashCommands) {
@@ -1057,6 +1090,7 @@ export async function runAcp(opts: {
       }
     }
   } finally {
+    finishStartupIndicator();
     clearInterval(keepAliveInterval);
     reconnectionHandle?.cancel();
     clearPendingTurn(new Error('ACP runner shutting down'));
