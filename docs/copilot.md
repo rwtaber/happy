@@ -113,10 +113,18 @@ Copilot ends turns deterministically: `AcpBackend.sendPrompt` treats the ACP
 end-of-turn, since a compliant agent sends it only after every `session/update`
 for the turn. This is opt-in per transport via
 `CopilotTransport.endsTurnOnPromptResolution()`, so turns end as soon as Copilot
-finishes rather than after a fixed idle gap. The 2s idle chunk-gap heuristic
-(`CopilotTransport.idle`) remains as a fallback for turns where `prompt()`
-resolves late or not at all. Transports that do not opt in (Gemini/OpenCode)
-keep the heuristic-only behavior.
+finishes rather than after a fixed idle gap.
+
+Because Copilot streams in bursts with multi-second think/tool gaps, the
+intra-turn idle heuristic (chunk-gap and tool-completion) is **suppressed** for
+transports with deterministic turn-end (`shouldSuppressHeuristicIdle` in
+`sessionUpdateHandlers.ts`). Otherwise it would fire during those gaps and mark
+the turn idle mid-response, making the app show the answer as finished while
+Copilot is still working. The session therefore stays in the `generating` state
+continuously until the authoritative `prompt()` end, matching Claude. If
+`prompt()` never resolves, `runAcp`'s per-turn `TURN_TIMEOUT_MS` is the ultimate
+safety net. Transports that do not opt in (Gemini/OpenCode) keep the
+heuristic-driven idle behavior unchanged.
 
 ## Known limitations
 
