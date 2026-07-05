@@ -13,7 +13,7 @@ import { DefaultTransport } from '../DefaultTransport';
 const COPILOT_TIMEOUTS = {
   /** Copilot CLI startup can take time for auth/init */
   init: 120_000,
-  /** Idle detection — Copilot streams chunkier than Gemini, needs longer gap tolerance */
+  /** Idle detection — Copilot streams in coarse chunks with >500ms gaps, so tolerate a longer gap before ending the turn */
   idle: 2_000,
 } as const;
 
