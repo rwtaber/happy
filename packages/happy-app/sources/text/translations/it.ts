@@ -840,6 +840,7 @@ export const it: TranslationStructure = {
     },
 
     message: {
+        thinking: 'Pensando',
         switchedToMode: ({ mode }: { mode: string }) => `Passato alla modalità ${mode}`,
         unknownEvent: 'Evento sconosciuto',
         usageLimitUntil: ({ time }: { time: string }) => `Limite di utilizzo raggiunto fino a ${time}`,
