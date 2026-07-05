@@ -262,9 +262,20 @@ export function getCodexEffortLevels(): EffortLevel[] {
     ];
 }
 
+export function getCopilotEffortLevels(): EffortLevel[] {
+    return [
+        { key: 'low', name: 'low' },
+        { key: 'medium', name: 'medium' },
+        { key: 'high', name: 'high' },
+        { key: 'xhigh', name: 'xhigh' },
+        { key: 'max', name: 'max' },
+    ];
+}
+
 export function getHardcodedEffortLevels(flavor: AgentFlavor): EffortLevel[] {
     if (flavor === 'claude') return getClaudeEffortLevels();
     if (flavor === 'codex') return getCodexEffortLevels();
+    if (flavor === 'copilot') return getCopilotEffortLevels();
     return [];
 }
 
@@ -283,6 +294,9 @@ export function getEffortLevelsForModel(flavor: AgentFlavor, _modelKey: string):
     }
     if (flavor === 'codex') {
         return getCodexEffortLevels();
+    }
+    if (flavor === 'copilot') {
+        return getCopilotEffortLevels();
     }
     return [];
 }

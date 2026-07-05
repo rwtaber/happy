@@ -270,6 +270,7 @@ function formatEnvelopeForServerLog(agentName: string, envelope: SessionEnvelope
 type AcpSwitchMode = {
   permissionMode?: string;
   model?: string | null;
+  effort?: string | null;
 };
 
 type AcpSelectableOption = {
@@ -322,7 +323,7 @@ function flattenSelectOptions(options: unknown): AcpSelectableOption[] {
 
 function extractConfigSelector(
   configOptions: SessionConfigOption[],
-  category: 'mode' | 'model',
+  category: 'mode' | 'model' | 'thought_level',
 ): AcpConfigSelector | null {
   const optionMatchesCategory = (option: SessionConfigOption): boolean => {
     if (option.category === category) {
@@ -333,6 +334,10 @@ function extractConfigSelector(
     const name = normalizeComparable(option.name);
     if (category === 'model') {
       return id.includes('model') || name.includes('model');
+    }
+    if (category === 'thought_level') {
+      return id.includes('effort') || id.includes('thought') || id.includes('reasoning')
+        || name.includes('effort') || name.includes('thinking') || name.includes('reasoning');
     }
     return id.includes('mode') || id.includes('permission') || name.includes('mode') || name.includes('permission');
   };
@@ -368,6 +373,16 @@ function isBypassPermissionMode(mode: string): boolean {
   }
   return normalized.includes('autopilot') || normalized.includes('bypass') || normalized.includes('yolo');
 }
+
+/**
+ * Initial permission mode applied per ACP agent before any user message. Copilot
+ * defaults to bypass (mirrors Claude/Codex defaulting to yolo) so the first turn
+ * honors the app's default even when the composer omits an explicit mode; an
+ * explicit mode from a user message overrides it before the prompt is sent.
+ */
+const DEFAULT_INITIAL_PERMISSION_MODE: Record<string, string | undefined> = {
+  copilot: 'bypassPermissions',
+};
 
 function resolveRequestedCode(options: AcpSelectableOption[], requested: string): string | null {
   for (const option of options) {
@@ -556,10 +571,12 @@ export async function runAcp(opts: {
   permissionHandler.reset('Previous CLI process exited before responding');
   const sessionManager = new AcpSessionManager();
   const messageQueue = new MessageQueue2<AcpSwitchMode>((mode) => hashObject(mode));
-  let currentPermissionMode: string | undefined;
+  let currentPermissionMode: string | undefined = DEFAULT_INITIAL_PERMISSION_MODE[opts.agentName];
   let currentModel: string | null | undefined;
+  let currentEffort: string | null | undefined;
   let modeSelector: AcpConfigSelector | null = null;
   let modelSelector: AcpConfigSelector | null = null;
+  let effortSelector: AcpConfigSelector | null = null;
   let legacyModes: SessionModeState | null = null;
   let legacyModels: SessionModelState | null = null;
   let sawSlashCommands = false;
@@ -727,6 +744,25 @@ export async function runAcp(opts: {
     }
   };
 
+  // Apply the ACP "thought_level" config option (e.g. Copilot's reasoning_effort).
+  const switchEffortIfRequested = async (requestedEffort: string): Promise<void> => {
+    if (!requestedEffort || !effortSelector) {
+      return;
+    }
+    const resolved = resolveRequestedCode(effortSelector.options, requestedEffort);
+    if (!resolved) {
+      logger.debug(`[${opts.agentName}] Ignoring unknown ACP effort request: ${requestedEffort}`);
+      return;
+    }
+    if (resolved === effortSelector.currentCode) {
+      return;
+    }
+    const switched = await backend.setSessionConfigOption(effortSelector.configId, resolved);
+    if (switched) {
+      effortSelector.currentCode = resolved;
+    }
+  };
+
   const onBackendMessage = (msg: AgentMessage) => {
     if (verbose) {
       logAcp('muted', `Outgoing raw backend message from ${opts.agentName}: ${formatUnknownForConsole(msg, ACP_RAW_PREVIEW_CHARS)}`);
@@ -765,6 +801,7 @@ export async function runAcp(opts: {
 
         modeSelector = extractConfigSelector(configOptions, 'mode');
         modelSelector = extractConfigSelector(configOptions, 'model');
+        effortSelector = extractConfigSelector(configOptions, 'thought_level');
         if (verbose) {
           if (modeSelector) {
             sawModes = true;
@@ -884,13 +921,19 @@ export async function runAcp(opts: {
       logger.debug(`[${opts.agentName}] Requested ACP model: ${currentModel ?? 'null'}`);
     }
 
+    if (message.meta && Object.prototype.hasOwnProperty.call(message.meta, 'effort')) {
+      currentEffort = message.meta.effort ?? null;
+      logger.debug(`[${opts.agentName}] Requested ACP effort: ${currentEffort ?? 'null'}`);
+    }
+
     if (!message.content.text) {
-      // Mode/model change only (no text prompt) — enqueue a config-only item so
-      // the main loop applies the change serially, after any in-flight turn and
+      // Mode/model/effort change only (no text prompt) — enqueue a config-only item
+      // so the main loop applies the change serially, after any in-flight turn and
       // after startSession completes, preventing races.
       messageQueue.push('', {
         permissionMode: currentPermissionMode,
         model: currentModel,
+        effort: currentEffort,
       });
       return;
     }
@@ -898,6 +941,7 @@ export async function runAcp(opts: {
     messageQueue.push(message.content.text, {
       permissionMode: currentPermissionMode,
       model: currentModel,
+      effort: currentEffort,
     });
   });
   session.keepAlive(thinking, 'remote');
@@ -969,6 +1013,9 @@ export async function runAcp(opts: {
         }
         if (typeof batch.mode.model === 'string' && batch.mode.model.length > 0) {
           await switchModelIfRequested(batch.mode.model);
+        }
+        if (typeof batch.mode.effort === 'string' && batch.mode.effort.length > 0) {
+          await switchEffortIfRequested(batch.mode.effort);
         }
         if (batch.message) {
           await backend.sendPrompt(acpSessionId, batch.message);

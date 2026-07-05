@@ -654,4 +654,59 @@ describe('runAcp', () => {
     expect(mocks.backendState.setModeCalls).toEqual([]);
     expect(mocks.backendState.setModelCalls).toEqual([]);
   });
+
+  it('switches ACP effort via the thought_level config option when requested', async () => {
+    mocks.backendState.startSessionMessages = [
+      {
+        type: 'event',
+        name: 'config_options_update',
+        payload: {
+          configOptions: [
+            {
+              type: 'select',
+              id: 'reasoning_effort',
+              name: 'Reasoning Effort',
+              category: 'thought_level',
+              currentValue: 'medium',
+              options: [
+                { value: 'low', name: 'Low' },
+                { value: 'medium', name: 'Medium' },
+                { value: 'high', name: 'High' },
+              ],
+            },
+          ],
+        },
+      },
+    ];
+
+    const runPromise = runAcp({
+      credentials: { token: 'token', encryption: { type: 'legacy', secret: new Uint8Array(32) } },
+      agentName: 'opencode',
+      command: 'opencode',
+      args: ['acp'],
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.getUserMessageHandler()).toBeTypeOf('function');
+    });
+
+    mocks.getUserMessageHandler()!({
+      role: 'user',
+      content: { type: 'text', text: 'Think harder' },
+      meta: { effort: 'high' },
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.backendState.prompts).toHaveLength(1);
+    });
+
+    await mocks.getKillHandler()!();
+    await runPromise;
+
+    expect(mocks.backendState.setConfigOptionCalls).toEqual([
+      { configId: 'reasoning_effort', value: 'high' },
+    ]);
+    expect(mocks.backendState.setModeCalls).toEqual([]);
+    expect(mocks.backendState.setModelCalls).toEqual([]);
+  });
 });

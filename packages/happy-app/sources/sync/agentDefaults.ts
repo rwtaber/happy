@@ -1,6 +1,6 @@
 import * as z from 'zod';
 
-export const agentKeys = ['claude', 'codex', 'gemini', 'openclaw'] as const;
+export const agentKeys = ['claude', 'codex', 'gemini', 'openclaw', 'copilot'] as const;
 export type AgentKey = typeof agentKeys[number];
 
 export const AgentDefaultOverrideSchema = z.object({
@@ -14,6 +14,7 @@ export const AgentDefaultOverridesSchema = z.object({
     codex: AgentDefaultOverrideSchema.optional(),
     gemini: AgentDefaultOverrideSchema.optional(),
     openclaw: AgentDefaultOverrideSchema.optional(),
+    copilot: AgentDefaultOverrideSchema.optional(),
 }).passthrough().default({});
 
 export type AgentDefaultOverride = z.infer<typeof AgentDefaultOverrideSchema>;
@@ -33,28 +34,19 @@ const codeAgentDefaults: Record<AgentKey, AgentDefaultConfig> = {
     codex: { permissionMode: 'yolo', modelMode: 'gpt-5.5', effortLevel: 'medium' },
     gemini: { permissionMode: 'default', modelMode: 'gemini-2.5-pro', effortLevel: null },
     openclaw: { permissionMode: 'default', modelMode: 'default', effortLevel: null },
+    // Copilot picks its model server-side ('auto'); default to bypass permissions
+    // so remote sessions run without prompting, matching Claude/Codex defaults.
+    copilot: { permissionMode: 'bypassPermissions', modelMode: 'auto', effortLevel: 'medium' },
 };
 
 export function normalizeAgentKey(flavor: string | null | undefined): AgentKey {
-    if (flavor === 'codex' || flavor === 'gemini' || flavor === 'openclaw') {
+    if (flavor === 'codex' || flavor === 'gemini' || flavor === 'openclaw' || flavor === 'copilot') {
         return flavor;
     }
     return 'claude';
 }
 
-// Copilot is not part of agentKeys (no persisted overrides UI yet), so define
-// its defaults separately instead of letting normalizeAgentKey() fall back to
-// Claude's (which yields the invalid model 'opus' for Copilot sessions).
-const copilotDefaults: AgentDefaultConfig = {
-    permissionMode: 'bypassPermissions',
-    modelMode: 'auto',
-    effortLevel: null,
-};
-
 export function getCodeAgentDefaults(flavor: string | null | undefined): AgentDefaultConfig {
-    if (flavor === 'copilot') {
-        return copilotDefaults;
-    }
     return codeAgentDefaults[normalizeAgentKey(flavor)];
 }
 
@@ -62,9 +54,6 @@ export function getAgentDefaultOverride(
     overrides: AgentDefaultOverrides | null | undefined,
     flavor: string | null | undefined,
 ): AgentDefaultOverride {
-    if (flavor === 'copilot') {
-        return {};
-    }
     return overrides?.[normalizeAgentKey(flavor)] ?? {};
 }
 

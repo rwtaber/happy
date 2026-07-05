@@ -653,7 +653,9 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
             const previousPermissionMode = currentPermissionMode;
             messagePermissionMode = resolveRemoteClaudePermissionMode(
                 currentPermissionMode,
-                message.meta.permissionMode,
+                // meta.permissionMode is now a widened string (ACP agents send operating-mode
+                // ids); the Claude path only ever receives Claude PermissionMode values.
+                message.meta.permissionMode as PermissionMode,
                 sandboxEnabled,
             );
             currentPermissionMode = messagePermissionMode;

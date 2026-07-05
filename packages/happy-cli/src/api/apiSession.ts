@@ -575,6 +575,12 @@ export class ApiSessionClient extends EventEmitter {
             return;
         }
 
+        // Not a recognized user/file message. Log why (so schema drift is not a
+        // silent drop) before routing to generic 'message' listeners.
+        logger.debug('[API] Incoming message did not match UserMessage/FileEvent schema; routing as generic message', {
+            role: (message as { role?: unknown })?.role,
+            userIssues: userResult.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })).slice(0, 5),
+        });
         this.emit('message', message);
     }
 

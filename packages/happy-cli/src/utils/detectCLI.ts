@@ -45,7 +45,7 @@ function detectPosix(): CLIAvailability {
   const openclawEnv = !!process.env.OPENCLAW_GATEWAY_URL;
   const openclaw = openclawCommand || openclawConfig || openclawEnv;
 
-  // Copilot: gh CLI must be installed and have the copilot extension
+  // Copilot: standalone `copilot` CLI must be installed
   const copilot = detectCopilotPosix();
 
   return { claude, codex, gemini, openclaw, copilot, detectedAt: Date.now() };

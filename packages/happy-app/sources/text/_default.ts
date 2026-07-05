@@ -451,6 +451,7 @@ export const en = {
             codex: 'Codex',
             gemini: 'Gemini',
             openclaw: 'OpenClaw',
+            copilot: 'Copilot',
         },
         model: {
             title: 'MODEL',

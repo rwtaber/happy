@@ -555,6 +555,15 @@ export default function MachineDetailScreen() {
                             }
                         />
                         <Item
+                            title="GitHub Copilot"
+                            showChevron={false}
+                            rightElement={
+                                <Text style={{ color: metadata.cliAvailability.copilot ? '#34C759' : theme.colors.textSecondary, fontSize: 14 }}>
+                                    {metadata.cliAvailability.copilot ? t('machine.cliInstalled') : t('machine.cliNotFound')}
+                                </Text>
+                            }
+                        />
+                        <Item
                             title={t('machine.lastDetected')}
                             subtitle={new Date(metadata.cliAvailability.detectedAt).toLocaleString()}
                             showChevron={false}
