@@ -79,6 +79,25 @@ stdio-only agents. The transport is chosen from the capabilities returned at
 `change_title` (Copilot namespaces it as `happy-change_title`); without the
 nudge the agent never renames the chat on its own.
 
+## Session resume
+
+Copilot advertises the ACP `loadSession` capability and persists sessions
+locally, so Happy can resume them. On the first `session/new`, `runAcp` stores
+the agent's ACP session id in `metadata.acpSessionId`; `happy resume <id>`
+relaunches `copilot --resume <acpSessionId>` and `AcpBackend` calls
+`connection.loadSession(...)` instead of creating a new session. If resume is
+unsupported or fails for any reason, it falls back to a fresh session, so it can
+never leave you worse off. (Gemini/OpenCode inherit the same capability-gated
+path.)
+
+## Image attachments
+
+Copilot's `promptCapabilities.image === true`, so image attachments sent from
+the app are forwarded. `runAcp` downloads and decrypts each attachment (the same
+`onFileEvent` / `drainAttachmentsForUserMessage` flow Claude and Codex use) and
+`AcpBackend` appends them to the prompt as ACP `image` content blocks. Image
+support is capability-gated: agents that do not advertise it receive text only.
+
 ## Startup on large workspaces
 
 On big, agent-heavy repositories Copilot's `session/new` can take tens of
@@ -89,13 +108,6 @@ and posts a one-time "starting up" notice
 
 ## Known limitations
 
-- **No session resume yet.** Copilot advertises ACP `loadSession: true`, but the
-  resume path (`buildResumeLaunch` / `resolveFlavor`) still only handles
-  `claude`/`codex`, and `runAcp` always calls `newSession`. (Gemini/OpenCode are
-  in the same boat.)
-- **Attachments are text-only.** Copilot's `promptCapabilities.image === true`,
-  but the shared ACP prompt path currently sends only text blocks, so image
-  attachments from the app are dropped.
 - **Turn completion is heuristic.** `AcpBackend.sendPrompt` awaits
   `connection.prompt()` but does not yet use its `stopReason`; turn-end is
   inferred from a 2s idle chunk-gap (`CopilotTransport.idle`). This is why the

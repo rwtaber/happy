@@ -9,7 +9,7 @@ vi.mock('@/ui/logger', () => ({
   },
 }));
 
-import { buildAcpMcpServers } from './AcpBackend';
+import { buildAcpMcpServers, buildAcpPromptBlocks } from './AcpBackend';
 
 describe('buildAcpMcpServers (MCP transport selection)', () => {
   it('returns an empty array when no servers are configured', () => {
@@ -104,5 +104,53 @@ describe('buildAcpMcpServers (MCP transport selection)', () => {
       { type: 'http', name: 'httpOne', url: 'http://h/mcp', headers: [] },
       { name: 'stdioOne', command: 'python3', args: ['server.py'], env: [] },
     ]);
+  });
+});
+
+
+describe('buildAcpPromptBlocks (prompt content blocks)', () => {
+  const img = (name: string, mimeType = 'image/png') => ({
+    data: new Uint8Array([1, 2, 3, 4]),
+    mimeType,
+    name,
+  });
+
+  it('returns a single text block when there are no attachments', () => {
+    expect(buildAcpPromptBlocks('hello', undefined, true)).toEqual([
+      { type: 'text', text: 'hello' },
+    ]);
+    expect(buildAcpPromptBlocks('hello', [], true)).toEqual([
+      { type: 'text', text: 'hello' },
+    ]);
+  });
+
+  it('appends base64 image blocks when the agent supports images', () => {
+    const blocks = buildAcpPromptBlocks('look', [img('a.png')], true);
+    expect(blocks).toEqual([
+      { type: 'text', text: 'look' },
+      { type: 'image', data: Buffer.from([1, 2, 3, 4]).toString('base64'), mimeType: 'image/png' },
+    ]);
+  });
+
+  it('drops all image attachments when the agent does not support images', () => {
+    const blocks = buildAcpPromptBlocks('look', [img('a.png'), img('b.jpg', 'image/jpeg')], false);
+    expect(blocks).toEqual([{ type: 'text', text: 'look' }]);
+  });
+
+  it('skips non-image attachments even when images are supported', () => {
+    const blocks = buildAcpPromptBlocks(
+      'files',
+      [img('doc.pdf', 'application/pdf'), img('pic.png')],
+      true,
+    );
+    expect(blocks).toEqual([
+      { type: 'text', text: 'files' },
+      { type: 'image', data: Buffer.from([1, 2, 3, 4]).toString('base64'), mimeType: 'image/png' },
+    ]);
+  });
+
+  it('preserves the order of multiple image attachments after the text block', () => {
+    const blocks = buildAcpPromptBlocks('multi', [img('1.png'), img('2.png')], true);
+    expect(blocks.map((b) => b.type)).toEqual(['text', 'image', 'image']);
   });
 });

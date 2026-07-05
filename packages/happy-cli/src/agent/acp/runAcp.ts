@@ -939,6 +939,28 @@ export async function runAcp(opts: {
 
   backend.onMessage(onBackendMessage);
 
+  // Collect image/file attachments the same way Claude and Codex do: each file
+  // event downloads and decrypts in the background; drainAttachmentsForUserMessage
+  // claims the ready set when the next prompt is sent.
+  session.onFileEvent((fileEvent) => {
+    const ev = fileEvent.content.data.ev;
+    logger.debug(`[${opts.agentName}] File event received: ${ev.name} (${ev.size} bytes, ref: ${ev.ref})`);
+    const downloadPromise = (async (): Promise<{ data: Uint8Array; mimeType: string; name: string } | null> => {
+      try {
+        const decrypted = await session.downloadAndDecryptAttachment(ev.ref);
+        if (!decrypted) {
+          logger.debug(`[${opts.agentName}] Failed to decrypt attachment: ${ev.name}`);
+          return null;
+        }
+        return { data: decrypted, mimeType: ev.mimeType ?? 'image/jpeg', name: ev.name };
+      } catch (error) {
+        logger.debug(`[${opts.agentName}] Failed to download attachment: ${ev.name}`, { error });
+        return null;
+      }
+    })();
+    session.trackAttachmentDownload(downloadPromise);
+  });
+
   session.onUserMessage((message) => {
     if (typeof message.meta?.permissionMode === 'string') {
       currentPermissionMode = message.meta.permissionMode;
@@ -1083,7 +1105,8 @@ export async function runAcp(opts: {
             ? `${batch.message}\n\n${ACP_CHANGE_TITLE_INSTRUCTION}`
             : batch.message;
           isFirstPrompt = false;
-          await backend.sendPrompt(acpSessionId, promptText);
+          const attachments = await session.drainAttachmentsForUserMessage();
+          await backend.sendPrompt(acpSessionId, promptText, attachments);
           await turnEnded;
         }
         sendEnvelopes(sessionManager.endTurn('completed'));

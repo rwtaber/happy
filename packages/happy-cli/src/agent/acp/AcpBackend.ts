@@ -363,6 +363,40 @@ export function buildAcpMcpServers(
 }
 
 /**
+ * Build the ACP prompt content blocks for a user message: always a text block,
+ * plus one image block per image attachment when the agent advertises image
+ * support. Non-image attachments and (when unsupported) all images are dropped.
+ *
+ * Exported so the block construction can be unit-tested in isolation.
+ */
+export function buildAcpPromptBlocks(
+  prompt: string,
+  attachments: Array<{ data: Uint8Array; mimeType: string; name: string }> | undefined,
+  agentSupportsImages: boolean,
+): ContentBlock[] {
+  const blocks: ContentBlock[] = [{ type: 'text', text: prompt }];
+  if (!attachments || attachments.length === 0) {
+    return blocks;
+  }
+  if (!agentSupportsImages) {
+    logger.debug(`[AcpBackend] Agent does not support image prompts; dropping ${attachments.length} attachment(s)`);
+    return blocks;
+  }
+  for (const attachment of attachments) {
+    if (!attachment.mimeType.startsWith('image/')) {
+      logger.debug(`[AcpBackend] Skipping non-image attachment "${attachment.name}" (${attachment.mimeType})`);
+      continue;
+    }
+    blocks.push({
+      type: 'image',
+      data: Buffer.from(attachment.data).toString('base64'),
+      mimeType: attachment.mimeType,
+    });
+  }
+  return blocks;
+}
+
+/**
  * ACP backend using the official @agentclientprotocol/sdk
  */
 export class AcpBackend implements AgentBackend {
@@ -393,6 +427,9 @@ export class AcpBackend implements AgentBackend {
 
   /** Whether the connected agent advertises the ACP `loadSession` capability. */
   private agentSupportsLoadSession = false;
+
+  /** Whether the connected agent advertises image prompt support. */
+  private agentSupportsImages = false;
 
   /** Track tool calls count since last prompt (to identify first tool call) */
   private toolCallCountSincePrompt = 0;
@@ -836,6 +873,10 @@ export class AcpBackend implements AgentBackend {
         agentCapabilities?: { loadSession?: boolean };
       }).agentCapabilities?.loadSession === true;
       logger.debug(`[AcpBackend] Agent loadSession support: ${this.agentSupportsLoadSession}`);
+      this.agentSupportsImages = (initializeResponse as {
+        agentCapabilities?: { promptCapabilities?: { image?: boolean } };
+      }).agentCapabilities?.promptCapabilities?.image === true;
+      logger.debug(`[AcpBackend] Agent image prompt support: ${this.agentSupportsImages}`);
       if (this.options.verbose) {
         logAcpBackendMuted(
           `Incoming initialize response from ${this.options.agentName}: ${summarizeSessionMetadataPayload(initializeResponse)}`,
@@ -1163,7 +1204,11 @@ export class AcpBackend implements AgentBackend {
   private idleResolver: (() => void) | null = null;
   private waitingForResponse = false;
 
-  async sendPrompt(sessionId: SessionId, prompt: string): Promise<void> {
+  async sendPrompt(
+    sessionId: SessionId,
+    prompt: string,
+    attachments?: Array<{ data: Uint8Array; mimeType: string; name: string }>,
+  ): Promise<void> {
     // Check if prompt contains change_title instruction (via optional callback)
     const promptHasChangeTitle = this.options.hasChangeTitleInstruction?.(prompt) ?? false;
 
@@ -1189,14 +1234,11 @@ export class AcpBackend implements AgentBackend {
       logger.debug(`[AcpBackend] Sending prompt (length: ${prompt.length}): ${prompt.substring(0, 100)}...`);
       logger.debug(`[AcpBackend] Full prompt: ${prompt}`);
       
-      const contentBlock: ContentBlock = {
-        type: 'text',
-        text: prompt,
-      };
+      const contentBlocks = buildAcpPromptBlocks(prompt, attachments, this.agentSupportsImages);
 
       const promptRequest: PromptRequest = {
         sessionId: this.acpSessionId,
-        prompt: [contentBlock],
+        prompt: contentBlocks,
       };
 
       logger.debug(`[AcpBackend] Prompt request:`, JSON.stringify(promptRequest, null, 2));

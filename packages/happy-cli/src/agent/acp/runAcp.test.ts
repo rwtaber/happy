@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => {
     onUserMessage: vi.fn((handler: (message: any) => void) => {
       userMessageHandler = handler;
     }),
+    onFileEvent: vi.fn(),
+    drainAttachmentsForUserMessage: vi.fn(async () => []),
+    downloadAndDecryptAttachment: vi.fn(async () => null),
+    trackAttachmentDownload: vi.fn(),
     keepAlive: vi.fn(),
     sendSessionProtocolMessage: vi.fn(),
     sendSessionEvent: vi.fn(),
