@@ -15,9 +15,8 @@ import { FileIcon } from '@/components/FileIcon';
 import { Typography } from '@/constants/Typography';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { t } from '@/text';
-import { ThinkingRailBody } from './ThinkingRailBody';
 
-export type SidebarMode = 'changes' | 'allFiles' | 'thinking';
+export type SidebarMode = 'changes' | 'allFiles';
 
 interface FilesSidebarProps {
     sessionId: string;
@@ -26,8 +25,6 @@ interface FilesSidebarProps {
     mode?: SidebarMode;
     onModeChange?: (mode: SidebarMode) => void;
     onAllFilesFilePress?: (filePath: string) => void;
-    /** Show a Thinking tab (Copilot chain-of-thought stream). */
-    showThinkingTab?: boolean;
 }
 
 type FileNode<T = GitFileStatus> = {
@@ -155,7 +152,6 @@ export const FilesSidebar = React.memo<FilesSidebarProps>(({
     mode = 'changes',
     onModeChange,
     onAllFilesFilePress,
-    showThinkingTab,
 }) => {
     const router = useRouter();
     const { theme } = useUnistyles();
@@ -242,22 +238,6 @@ export const FilesSidebar = React.memo<FilesSidebarProps>(({
                                 {t('files.allFiles')}
                             </Text>
                         </Pressable>
-                        {showThinkingTab ? (
-                            <Pressable
-                                onPress={() => onModeChange('thinking')}
-                                style={[
-                                    styles.tab,
-                                    mode === 'thinking' && { backgroundColor: theme.colors.surface },
-                                ]}
-                            >
-                                <Text style={[
-                                    styles.tabText,
-                                    mode === 'thinking' && styles.tabTextActive,
-                                ]} numberOfLines={1}>
-                                    {t('message.thinking')}
-                                </Text>
-                            </Pressable>
-                        ) : null}
                     </View>
                 ) : (
                     <Text style={styles.headerTitle} numberOfLines={1}>{t('files.changes')}</Text>
@@ -274,9 +254,7 @@ export const FilesSidebar = React.memo<FilesSidebarProps>(({
                 ) : null}
             </View>
 
-            {mode === 'thinking' ? (
-                <ThinkingRailBody sessionId={sessionId} />
-            ) : mode === 'changes' ? (
+            {mode === 'changes' ? (
                 <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
                     {!hasFiles ? (
                         <View style={styles.emptyState}>

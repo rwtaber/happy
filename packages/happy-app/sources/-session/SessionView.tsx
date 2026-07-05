@@ -72,11 +72,8 @@ export const SessionView = React.memo((props: { id: string }) => {
     const fileDiffsSidebarEnabled = useSetting('fileDiffsSidebar');
     const zenMode = useLocalSetting('zenMode');
 
-    const isCopilot = session?.metadata?.flavor === 'copilot';
-
-    // Base condition: can we show the right rail at all? Copilot gets it even
-    // when the diff sidebar setting is off, since it hosts the Thinking stream.
-    const canShowSidebar = (fileDiffsSidebarEnabled || isCopilot)
+    // Base condition: can we show the diff sidebar at all?
+    const canShowSidebar = fileDiffsSidebarEnabled
         && (isRunningOnMac() || Platform.OS === 'web')
         && windowWidth >= SIDEBAR_MIN_WINDOW_WIDTH
         && isDataReady && !!session;
@@ -108,18 +105,6 @@ export const SessionView = React.memo((props: { id: string }) => {
     }));
 
     const [sidebarMode, setSidebarMode] = React.useState<SidebarMode>('changes');
-
-    // Auto-open the Thinking rail when a Copilot session starts thinking so its
-    // chain-of-thought streams in without the user hunting for it. Rising edge
-    // only — the user can switch to Changes/Files afterward.
-    const wasThinkingRef = React.useRef(false);
-    React.useEffect(() => {
-        const nowThinking = isCopilot && session?.thinking === true;
-        if (nowThinking && !wasThinkingRef.current) {
-            setSidebarMode('thinking');
-        }
-        wasThinkingRef.current = nowThinking;
-    }, [isCopilot, session?.thinking]);
 
     // Overlay state is managed as a browser-style history stack so the
     // sidebar's back / forward arrows can navigate between chat ↔ diff ↔ file
@@ -364,7 +349,6 @@ export const SessionView = React.memo((props: { id: string }) => {
                         mode={sidebarMode}
                         onModeChange={setSidebarMode}
                         onAllFilesFilePress={handleAllFilesFilePress}
-                        showThinkingTab={isCopilot}
                     />
                 </View>
             </Animated.View>
