@@ -100,10 +100,10 @@ export const settingsDefaults: Settings = {
 
     hideInactiveSessions: false,
     sortSessionsByActivity: false,
-    expResumeSession: false,
+    expResumeSession: true,
     fileDiffsSidebar: false,
     groupToolCalls: false,
-    expImageUpload: false,
+    expImageUpload: true,
     reviewPromptAnswered: false,
     reviewPromptLikedApp: null,
     voiceAssistantLanguage: null,
