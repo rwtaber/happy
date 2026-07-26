@@ -6,7 +6,6 @@ import {
     getAvailablePermissionModes,
     getClaudeModelModes,
     getCodexModelModes,
-    getClaudeModelModes,
     getClaudePermissionModes,
     getDefaultEffortKey,
     getDefaultModelKey,
@@ -54,27 +53,10 @@ describe('modelModeOptions', () => {
         expect(models[1].name).toBe('gpt-5.6 sol');
     });
 
-    it('builds claude model fallbacks with fable 5', () => {
-        const models = getClaudeModelModes();
-        expect(models.map((model) => model.key)).toEqual([
-            'default',
-            'claude-opus-5',
-            'opus',
-            'fable',
-            'sonnet',
-            'haiku',
-        ]);
-        expect(models.find((model) => model.key === 'fable')).toEqual({
-            key: 'fable',
-            name: 'fable 5',
-            description: null,
-        });
-    });
-
     it('uses code defaults for agent defaults', () => {
         expect(getDefaultPermissionModeKey('claude')).toBe('bypassPermissions');
         expect(getDefaultModelKey('claude')).toBe('opus');
-        expect(getDefaultEffortKey('claude')).toBe('max');
+        expect(getDefaultEffortKey('claude')).toBe('medium');
         expect(getDefaultPermissionModeKey('codex')).toBe('yolo');
         expect(getDefaultModelKey('codex')).toBe('gpt-5.5');
         expect(getDefaultEffortKey('codex')).toBe('medium');
@@ -82,7 +64,7 @@ describe('modelModeOptions', () => {
 
     it('exposes fable as the most capable claude model option', () => {
         const models = getClaudeModelModes();
-        expect(models.map((model) => model.key)).toEqual(['default', 'fable', 'opus', 'sonnet', 'haiku']);
+        expect(models.map((model) => model.key)).toEqual(['default', 'fable', 'claude-opus-5', 'opus', 'sonnet', 'haiku']);
     });
 
     it('matches a legacy claude-fable-5 key to the fable picker option', () => {
