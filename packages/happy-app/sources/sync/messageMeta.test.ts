@@ -83,7 +83,7 @@ describe('resolveMessageModeMeta', () => {
             metadata: { flavor: 'claude' },
         } as any);
 
-        expect(meta).toEqual({ model: 'claude-opus-4-8' });
+        expect(meta).toEqual({ model: 'claude-opus-5' });
     });
 
     it('treats an explicit default model as a reset override', () => {

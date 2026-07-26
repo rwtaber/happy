@@ -3,7 +3,12 @@
 // must resolve to a real model id at send time — otherwise the CLI rejects the
 // session with "model not found". The newest Opus is the most capable model, so
 // fable maps to it.
-const MOST_CAPABLE_MODEL = 'claude-opus-4-8';
+//
+// This is the full model id (not the `opus-5` short alias): the alias is not in
+// the CLI's alias table yet, while the full id passes straight through to the
+// API — matching how the model picker lists Opus 5. Bump this when a newer Opus
+// ships so fable keeps tracking "most capable".
+const MOST_CAPABLE_MODEL = 'claude-opus-5';
 
 // Picker key (or legacy stored key) -> real model id sent to the Claude SDK.
 const MODEL_SEND_ALIASES: Record<string, string> = {
