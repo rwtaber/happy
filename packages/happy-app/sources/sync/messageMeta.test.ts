@@ -74,6 +74,17 @@ describe('resolveMessageModeMeta', () => {
         });
     });
 
+    it('resolves the fable alias to a real claude model id at send time', () => {
+        const meta = resolveMessageModeMeta({
+            permissionMode: null,
+            modelMode: 'fable',
+            effortLevel: null,
+            metadata: { flavor: 'claude' },
+        } as any);
+
+        expect(meta).toEqual({ model: 'claude-opus-4-8' });
+    });
+
     it('treats an explicit default model as a reset override', () => {
         const meta = resolveMessageModeMeta({
             permissionMode: null,

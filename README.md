@@ -50,6 +50,8 @@ Step 3: Start using `happy` instead of `claude` or `codex`
 happy claude
 # or
 happy codex
+# or GitHub Copilot CLI (this fork):
+happy copilot
 ```
 
 ## How does it work?

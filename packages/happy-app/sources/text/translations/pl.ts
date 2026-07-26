@@ -453,6 +453,7 @@ export const pl: TranslationStructure = {
             codex: 'Codex',
             gemini: 'Gemini',
             openclaw: 'OpenClaw',
+            copilot: 'Copilot',
         },
         model: {
             title: 'MODEL',
@@ -857,6 +858,7 @@ export const pl: TranslationStructure = {
     },
 
     message: {
+        thinking: 'Myśli',
         switchedToMode: ({ mode }: { mode: string }) => `Przełączono na tryb ${mode}`,
         unknownEvent: 'Nieznane zdarzenie',
         usageLimitUntil: ({ time }: { time: string }) => `Osiągnięto limit użycia do ${time}`,

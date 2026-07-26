@@ -148,6 +148,36 @@ Conversation history is preserved on the server, but in-flight tool calls are in
       process.exit(1)
     }
     return;
+  } else if (subcommand === 'copilot') {
+    // Handle copilot command
+    try {
+      const { runCopilot, assertCopilotInstalled } = await import('@/copilot/runCopilot');
+
+      let startedBy: 'daemon' | 'terminal' | undefined = undefined;
+      let resumeSessionId: string | undefined = undefined;
+      for (let i = 1; i < args.length; i++) {
+        if (args[i] === '--started-by') {
+          startedBy = args[++i] as 'daemon' | 'terminal';
+        } else if (args[i] === '--resume') {
+          resumeSessionId = args[++i];
+        }
+      }
+
+      // Preflight: verify copilot binary before paying the cost of auth + daemon startup
+      assertCopilotInstalled();
+
+      const { credentials } = await authAndSetupMachineIfNeeded();
+      await ensureDaemonRunning();
+
+      await runCopilot({ credentials, startedBy, resumeSessionId });
+    } catch (error) {
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error')
+      if (process.env.DEBUG) {
+        console.error(error)
+      }
+      process.exit(1)
+    }
+    return;
   } else if (subcommand === 'gemini') {
     // Handle gemini subcommands
     const geminiSubcommand = args[1];

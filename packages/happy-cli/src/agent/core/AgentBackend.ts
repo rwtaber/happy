@@ -39,9 +39,17 @@ export type AgentMessage =
 
 /** MCP server configuration for tools */
 export interface McpServerConfig {
+  /** Command to launch a stdio MCP server. */
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  /**
+   * HTTP endpoint for the MCP server. When set and the ACP agent advertises MCP
+   * `http` support, this transport is used instead of the stdio `command`
+   * (required for agents like Copilot that do not support stdio MCP servers).
+   */
+  url?: string;
+  headers?: Record<string, string>;
 }
 
 /** Transport type for agent communication */
@@ -88,6 +96,12 @@ export interface AcpAgentConfig extends AgentBackendConfig {
  */
 export interface StartSessionResult {
   sessionId: SessionId;
+  /**
+   * The agent's own session identifier (e.g. the ACP session id). Distinct
+   * from `sessionId`, which is an opaque handle used by the caller. Persisted
+   * so the session can later be resumed via the agent's resume mechanism.
+   */
+  agentSessionId?: SessionId;
 }
 
 /**

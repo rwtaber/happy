@@ -451,6 +451,7 @@ export const en = {
             codex: 'Codex',
             gemini: 'Gemini',
             openclaw: 'OpenClaw',
+            copilot: 'Copilot',
         },
         model: {
             title: 'MODEL',
@@ -856,6 +857,7 @@ export const en = {
     },
 
     message: {
+        thinking: 'Thinking',
         switchedToMode: ({ mode }: { mode: string }) => `Switched to ${mode} mode`,
         unknownEvent: 'Unknown event',
         usageLimitUntil: ({ time }: { time: string }) => `Usage limit reached until ${time}`,

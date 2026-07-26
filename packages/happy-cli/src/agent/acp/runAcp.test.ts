@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => {
     onUserMessage: vi.fn((handler: (message: any) => void) => {
       userMessageHandler = handler;
     }),
+    onFileEvent: vi.fn(),
+    drainAttachmentsForUserMessage: vi.fn(async () => []),
+    downloadAndDecryptAttachment: vi.fn(async () => null),
+    trackAttachmentDownload: vi.fn(),
     keepAlive: vi.fn(),
     sendSessionProtocolMessage: vi.fn(),
     sendSessionEvent: vi.fn(),
@@ -247,10 +251,17 @@ describe('runAcp', () => {
 
     expect(mocks.backendState.constructorArgs.command).toBe('opencode');
     expect(mocks.backendState.constructorArgs.args).toEqual(['--acp']);
-    expect(mocks.backendState.prompts[0]).toEqual({
-      sessionId: 'acp-session-1',
-      prompt: 'Build a test plan',
-    });
+    // The happy MCP server is passed with BOTH a native http url (used by
+    // agents that support MCP http, e.g. Copilot) and a stdio bridge command
+    // (fallback for stdio-only agents). AcpBackend picks per agent capability.
+    expect(typeof mocks.backendState.constructorArgs.mcpServers.happy.url).toBe('string');
+    expect(typeof mocks.backendState.constructorArgs.mcpServers.happy.command).toBe('string');
+    expect(typeof mocks.backendState.constructorArgs.hasChangeTitleInstruction).toBe('function');
+    // The first prompt of a session carries the user's message plus the
+    // appended change_title instruction (so the agent names the conversation).
+    expect(mocks.backendState.prompts[0].sessionId).toBe('acp-session-1');
+    expect(mocks.backendState.prompts[0].prompt).toContain('Build a test plan');
+    expect(mocks.backendState.prompts[0].prompt).toContain('change_title');
 
     const envelopeTypes = mocks.mockSession.sendSessionProtocolMessage.mock.calls.map(([envelope]) => envelope.ev.t);
     expect(envelopeTypes).toEqual(['turn-start', 'text', 'tool-call-start', 'tool-call-end', 'turn-end']);
@@ -653,5 +664,114 @@ describe('runAcp', () => {
     expect(mocks.backendState.setConfigOptionCalls).toEqual([]);
     expect(mocks.backendState.setModeCalls).toEqual([]);
     expect(mocks.backendState.setModelCalls).toEqual([]);
+  });
+
+  it('switches ACP effort via the thought_level config option when requested', async () => {
+    mocks.backendState.startSessionMessages = [
+      {
+        type: 'event',
+        name: 'config_options_update',
+        payload: {
+          configOptions: [
+            {
+              type: 'select',
+              id: 'reasoning_effort',
+              name: 'Reasoning Effort',
+              category: 'thought_level',
+              currentValue: 'medium',
+              options: [
+                { value: 'low', name: 'Low' },
+                { value: 'medium', name: 'Medium' },
+                { value: 'high', name: 'High' },
+              ],
+            },
+          ],
+        },
+      },
+    ];
+
+    const runPromise = runAcp({
+      credentials: { token: 'token', encryption: { type: 'legacy', secret: new Uint8Array(32) } },
+      agentName: 'opencode',
+      command: 'opencode',
+      args: ['acp'],
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.getUserMessageHandler()).toBeTypeOf('function');
+    });
+
+    mocks.getUserMessageHandler()!({
+      role: 'user',
+      content: { type: 'text', text: 'Think harder' },
+      meta: { effort: 'high' },
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.backendState.prompts).toHaveLength(1);
+    });
+
+    await mocks.getKillHandler()!();
+    await runPromise;
+
+    expect(mocks.backendState.setConfigOptionCalls).toEqual([
+      { configId: 'reasoning_effort', value: 'high' },
+    ]);
+    expect(mocks.backendState.setModeCalls).toEqual([]);
+    expect(mocks.backendState.setModelCalls).toEqual([]);
+  });
+
+  it('applies Copilot autopilot mode on the first turn when no explicit permission mode is sent', async () => {
+    const AUTOPILOT = 'https://agentclientprotocol.com/protocol/session-modes#autopilot';
+    mocks.backendState.startSessionMessages = [
+      {
+        type: 'event',
+        name: 'config_options_update',
+        payload: {
+          configOptions: [
+            {
+              type: 'select',
+              id: 'mode',
+              name: 'Mode',
+              category: 'mode',
+              currentValue: 'https://agentclientprotocol.com/protocol/session-modes#agent',
+              options: [
+                { value: 'https://agentclientprotocol.com/protocol/session-modes#agent', name: 'Agent' },
+                { value: 'https://agentclientprotocol.com/protocol/session-modes#plan', name: 'Plan' },
+                { value: AUTOPILOT, name: 'Autopilot' },
+              ],
+            },
+          ],
+        },
+      },
+    ];
+
+    const runPromise = runAcp({
+      credentials: { token: 'token', encryption: { type: 'legacy', secret: new Uint8Array(32) } },
+      agentName: 'copilot',
+      command: 'copilot',
+      args: ['--acp'],
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.getUserMessageHandler()).toBeTypeOf('function');
+    });
+
+    // No meta at all — the composer omits permissionMode when it equals the default.
+    mocks.getUserMessageHandler()!({
+      role: 'user',
+      content: { type: 'text', text: 'do it' },
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.backendState.prompts).toHaveLength(1);
+    });
+
+    await mocks.getKillHandler()!();
+    await runPromise;
+
+    expect(mocks.backendState.setConfigOptionCalls).toEqual([
+      { configId: 'mode', value: AUTOPILOT },
+    ]);
   });
 });

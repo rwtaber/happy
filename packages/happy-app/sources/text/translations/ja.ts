@@ -438,6 +438,7 @@ export const ja: TranslationStructure = {
             codex: 'Codex',
             gemini: 'Gemini',
             openclaw: 'OpenClaw',
+            copilot: 'Copilot',
         },
         model: {
             title: 'モデル',
@@ -842,6 +843,7 @@ export const ja: TranslationStructure = {
     },
 
     message: {
+        thinking: '思考中',
         switchedToMode: ({ mode }: { mode: string }) => `${mode}モードに切り替えました`,
         unknownEvent: '不明なイベント',
         usageLimitUntil: ({ time }: { time: string }) => `${time}まで使用制限中`,

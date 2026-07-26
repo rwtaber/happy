@@ -8,23 +8,27 @@ export interface CLIAvailability {
   codex: boolean;
   gemini: boolean;
   openclaw: boolean;
+  copilot: boolean;
   detectedAt: number;
 }
 
 /**
- * Detects which CLI tools are available on this machine.
- * Cross-platform: uses `command -v` on POSIX, `Get-Command` on Windows.
+ * Cross-platform check for whether a command is resolvable on PATH.
+ * Uses `command -v` on POSIX and `Get-Command` on Windows.
+ *
+ * This is the single source of truth for "is <tool> installed", shared by
+ * CLI availability detection and the per-agent install guards (e.g. the
+ * Copilot entry point) so the two never disagree.
  */
-export function detectCLIAvailability(): CLIAvailability {
-  const isWindows = os.platform() === 'win32';
-
-  if (isWindows) {
-    return detectWindows();
+export function isCommandAvailable(command: string): boolean {
+  if (os.platform() === 'win32') {
+    try {
+      execSync(`powershell -NoProfile -Command "Get-Command ${command} -ErrorAction SilentlyContinue"`, { stdio: 'ignore', windowsHide: true });
+      return true;
+    } catch {
+      return false;
+    }
   }
-  return detectPosix();
-}
-
-function commandExists(command: string): boolean {
   try {
     execSync(`command -v ${command} >/dev/null 2>&1`, { stdio: 'ignore' });
     return true;
@@ -33,39 +37,21 @@ function commandExists(command: string): boolean {
   }
 }
 
-function detectPosix(): CLIAvailability {
-  const claude = commandExists('claude');
-  const codex = commandExists('codex');
-  const gemini = commandExists('gemini');
+/**
+ * Detects which CLI tools are available on this machine.
+ */
+export function detectCLIAvailability(): CLIAvailability {
+  const claude = isCommandAvailable('claude');
+  const codex = isCommandAvailable('codex');
+  const gemini = isCommandAvailable('gemini');
 
-  // OpenClaw: check command, config file, or env var
-  const openclawCommand = commandExists('openclaw');
-  const openclawConfig = existsSync(join(os.homedir(), '.openclaw', 'openclaw.json'));
-  const openclawEnv = !!process.env.OPENCLAW_GATEWAY_URL;
-  const openclaw = openclawCommand || openclawConfig || openclawEnv;
+  // OpenClaw: present if the command exists, its config file exists, or the
+  // gateway env var is set.
+  const openclawConfig = join(process.env.USERPROFILE || os.homedir(), '.openclaw', 'openclaw.json');
+  const openclaw = isCommandAvailable('openclaw') || existsSync(openclawConfig) || !!process.env.OPENCLAW_GATEWAY_URL;
 
-  return { claude, codex, gemini, openclaw, detectedAt: Date.now() };
-}
+  // Copilot: standalone `copilot` CLI must be installed.
+  const copilot = isCommandAvailable('copilot');
 
-function detectWindows(): CLIAvailability {
-  const checkCommand = (name: string): boolean => {
-    try {
-      execSync(`powershell -NoProfile -Command "Get-Command ${name} -ErrorAction SilentlyContinue"`, { stdio: 'ignore', windowsHide: true });
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const claude = checkCommand('claude');
-  const codex = checkCommand('codex');
-  const gemini = checkCommand('gemini');
-
-  // OpenClaw: check command, config file, or env var
-  const openclawCommand = checkCommand('openclaw');
-  const openclawConfig = existsSync(join(process.env.USERPROFILE || os.homedir(), '.openclaw', 'openclaw.json'));
-  const openclawEnv = !!process.env.OPENCLAW_GATEWAY_URL;
-  const openclaw = openclawCommand || openclawConfig || openclawEnv;
-
-  return { claude, codex, gemini, openclaw, detectedAt: Date.now() };
+  return { claude, codex, gemini, openclaw, copilot, detectedAt: Date.now() };
 }

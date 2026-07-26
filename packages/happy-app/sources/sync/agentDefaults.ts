@@ -1,6 +1,6 @@
 import * as z from 'zod';
 
-export const agentKeys = ['claude', 'codex', 'gemini', 'openclaw'] as const;
+export const agentKeys = ['claude', 'codex', 'gemini', 'openclaw', 'copilot'] as const;
 export type AgentKey = typeof agentKeys[number];
 
 export const AgentDefaultOverrideSchema = z.object({
@@ -14,6 +14,7 @@ export const AgentDefaultOverridesSchema = z.object({
     codex: AgentDefaultOverrideSchema.optional(),
     gemini: AgentDefaultOverrideSchema.optional(),
     openclaw: AgentDefaultOverrideSchema.optional(),
+    copilot: AgentDefaultOverrideSchema.optional(),
 }).passthrough().default({});
 
 export type AgentDefaultOverride = z.infer<typeof AgentDefaultOverrideSchema>;
@@ -33,10 +34,15 @@ const codeAgentDefaults: Record<AgentKey, AgentDefaultConfig> = {
     codex: { permissionMode: 'yolo', modelMode: 'gpt-5.5', effortLevel: 'medium' },
     gemini: { permissionMode: 'default', modelMode: 'gemini-2.5-pro', effortLevel: null },
     openclaw: { permissionMode: 'default', modelMode: 'default', effortLevel: null },
+    // Copilot picks its model server-side ('auto'); default to bypass permissions
+    // so remote sessions run without prompting, matching Claude/Codex defaults.
+    // Default to Autopilot (Copilot's allow-all/auto-run operating mode). The value
+    // is the ACP session-mode id so it matches metadata.operatingModes in-session.
+    copilot: { permissionMode: 'https://agentclientprotocol.com/protocol/session-modes#autopilot', modelMode: 'auto', effortLevel: 'medium' },
 };
 
 export function normalizeAgentKey(flavor: string | null | undefined): AgentKey {
-    if (flavor === 'codex' || flavor === 'gemini' || flavor === 'openclaw') {
+    if (flavor === 'codex' || flavor === 'gemini' || flavor === 'openclaw' || flavor === 'copilot') {
         return flavor;
     }
     return 'claude';

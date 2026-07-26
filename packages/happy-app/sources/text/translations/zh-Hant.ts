@@ -437,6 +437,7 @@ export const zhHant: TranslationStructure = {
             codex: 'Codex',
             gemini: 'Gemini',
             openclaw: 'OpenClaw',
+            copilot: 'Copilot',
         },
         model: {
             title: '模型',
@@ -841,6 +842,7 @@ export const zhHant: TranslationStructure = {
     },
 
     message: {
+        thinking: '思考中',
         switchedToMode: ({ mode }: { mode: string }) => `已切換到 ${mode} 模式`,
         unknownEvent: '未知事件',
         usageLimitUntil: ({ time }: { time: string }) => `使用限制到 ${time}`,

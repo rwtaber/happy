@@ -1,6 +1,7 @@
 import type { Metadata } from '@/sync/storageTypes';
 import { hackModes } from '@/sync/modeHacks';
 import { getCodeAgentDefaults } from '@/sync/agentDefaults';
+import { normalizeModelDisplayKey } from '@/sync/modelAliases';
 
 export type ModeOption = {
     key: string;
@@ -77,6 +78,7 @@ export function getGeminiPermissionModes(translate: Translate): PermissionMode[]
 export function getClaudeModelModes(): ModelMode[] {
     return [
         { key: 'default', name: 'default model', description: null },
+        { key: 'fable', name: 'fable 5', description: 'most capable' },
         { key: 'opus', name: 'opus 4.8', description: null },
         { key: 'fable', name: 'fable 5', description: null },
         { key: 'sonnet', name: 'sonnet 4.6', description: null },
@@ -102,6 +104,26 @@ export function getGeminiModelModes(): ModelMode[] {
 }
 
 export function getOpenClawPermissionModes(translate: Translate): PermissionMode[] {
+    return buildDefaultPermissionModes(translate);
+}
+
+// Copilot exposes its operating modes as ACP session-mode ids. These mirror what
+// a live session reports via metadata.operatingModes, so the new-session composer
+// (which has no live metadata yet) shows the SAME options as an active session.
+const COPILOT_SESSION_MODE_BASE = 'https://agentclientprotocol.com/protocol/session-modes#';
+export const COPILOT_MODE_AGENT = `${COPILOT_SESSION_MODE_BASE}agent`;
+export const COPILOT_MODE_PLAN = `${COPILOT_SESSION_MODE_BASE}plan`;
+export const COPILOT_MODE_AUTOPILOT = `${COPILOT_SESSION_MODE_BASE}autopilot`;
+
+export function getCopilotPermissionModes(_translate: Translate): PermissionMode[] {
+    return [
+        { key: COPILOT_MODE_AGENT, name: 'Agent', description: 'Default agent mode for conversational interactions' },
+        { key: COPILOT_MODE_PLAN, name: 'Plan', description: 'Plan mode for creating and executing multi-step plans' },
+        { key: COPILOT_MODE_AUTOPILOT, name: 'Autopilot', description: 'Autonomous mode that enables allow-all and runs until task completion (experimental)' },
+    ];
+}
+
+function buildDefaultPermissionModes(translate: Translate): PermissionMode[] {
     return [
         { key: 'default', name: translate('agentInput.permissionMode.default'), description: null },
         { key: 'bypassPermissions', name: translate('agentInput.permissionMode.bypassPermissions'), description: null },
@@ -118,10 +140,37 @@ export function getHardcodedPermissionModes(flavor: AgentFlavor, translate: Tran
     if (flavor === 'openclaw') {
         return getOpenClawPermissionModes(translate);
     }
+    if (flavor === 'copilot') {
+        return getCopilotPermissionModes(translate);
+    }
     return getClaudePermissionModes(translate);
 }
 
 export function getOpenClawModelModes(): ModelMode[] {
+    return buildDefaultModelModes();
+}
+
+export function getCopilotModelModes(): ModelMode[] {
+    // Fallback list shown before a live ACP session reports metadata.models
+    // (e.g. in the new-session composer). Once the session starts, the real
+    // list from metadata.models takes over via getAvailableModels().
+    return [
+        { key: 'auto', name: 'auto', description: 'let Copilot pick the best model' },
+        { key: 'claude-sonnet-5', name: 'Claude Sonnet 5', description: null },
+        { key: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6', description: null },
+        { key: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', description: null },
+        { key: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', description: 'fast & efficient' },
+        { key: 'claude-opus-4.8', name: 'Claude Opus 4.8', description: 'most capable' },
+        { key: 'gpt-5.5', name: 'GPT-5.5', description: null },
+        { key: 'gpt-5.4', name: 'GPT-5.4', description: null },
+        { key: 'gpt-5.3-codex', name: 'GPT-5.3-Codex', description: null },
+        { key: 'gpt-5.4-mini', name: 'GPT-5.4 mini', description: null },
+        { key: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', description: null },
+        { key: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', description: null },
+    ];
+}
+
+function buildDefaultModelModes(): ModelMode[] {
     return [
         { key: 'default', name: 'default model', description: null },
     ];
@@ -136,6 +185,9 @@ export function getHardcodedModelModes(flavor: AgentFlavor, _translate: Translat
     }
     if (flavor === 'openclaw') {
         return getOpenClawModelModes();
+    }
+    if (flavor === 'copilot') {
+        return getCopilotModelModes();
     }
     return getClaudeModelModes();
 }
@@ -176,7 +228,8 @@ export function findOptionByKey<T extends ModeOption>(options: T[], key: string 
     if (!key) {
         return null;
     }
-    return options.find((option) => option.key === key) ?? null;
+    const normalizedKey = normalizeModelDisplayKey(key);
+    return options.find((option) => option.key === normalizedKey) ?? null;
 }
 
 export function resolveCurrentOption<T extends ModeOption>(
@@ -221,9 +274,20 @@ export function getCodexEffortLevels(): EffortLevel[] {
     ];
 }
 
+export function getCopilotEffortLevels(): EffortLevel[] {
+    return [
+        { key: 'low', name: 'low' },
+        { key: 'medium', name: 'medium' },
+        { key: 'high', name: 'high' },
+        { key: 'xhigh', name: 'xhigh' },
+        { key: 'max', name: 'max' },
+    ];
+}
+
 export function getHardcodedEffortLevels(flavor: AgentFlavor): EffortLevel[] {
     if (flavor === 'claude') return getClaudeEffortLevels();
     if (flavor === 'codex') return getCodexEffortLevels();
+    if (flavor === 'copilot') return getCopilotEffortLevels();
     return [];
 }
 
@@ -242,6 +306,9 @@ export function getEffortLevelsForModel(flavor: AgentFlavor, _modelKey: string):
     }
     if (flavor === 'codex') {
         return getCodexEffortLevels();
+    }
+    if (flavor === 'copilot') {
+        return getCopilotEffortLevels();
     }
     return [];
 }

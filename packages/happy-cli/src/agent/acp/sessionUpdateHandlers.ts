@@ -97,6 +97,40 @@ export function parseArgsFromContent(content: unknown): Record<string, unknown> 
 }
 
 /**
+ * Extract text from tool_call_update content for intermediate output relay.
+ * Copilot sends content as an array of {type: "content", content: {text, type}} objects,
+ * or sometimes the rawOutput field contains the final text.
+ */
+export function extractToolUpdateText(content: unknown): string | null {
+  if (!content) return null;
+
+  // Array format: [{type: "content", content: {text: "...", type: "text"}}]
+  if (Array.isArray(content)) {
+    const texts: string[] = [];
+    for (const item of content) {
+      if (item && typeof item === 'object') {
+        const obj = item as Record<string, unknown>;
+        const inner = obj.content as Record<string, unknown> | undefined;
+        if (inner && typeof inner.text === 'string') {
+          texts.push(inner.text);
+        }
+      }
+    }
+    return texts.length > 0 ? texts.join('\n') : null;
+  }
+
+  // Object format with text field
+  if (typeof content === 'object' && content !== null) {
+    const obj = content as Record<string, unknown>;
+    if (typeof obj.text === 'string') return obj.text;
+  }
+
+  if (typeof content === 'string') return content;
+
+  return null;
+}
+
+/**
  * Extract error detail from update content
  */
 export function extractErrorDetail(content: unknown): string | undefined {
@@ -148,6 +182,21 @@ export function formatDurationMinutes(startTime: number | undefined): string {
 }
 
 /**
+ * Whether the heuristic (chunk-gap / tool-completion) idle emits should be
+ * suppressed for the current transport.
+ *
+ * Transports that end the turn deterministically on the ACP `prompt()` response
+ * (e.g. Copilot, via `endsTurnOnPromptResolution`) must NOT emit idle from the
+ * intra-turn heuristics: Copilot streams in bursts with multi-second think/tool
+ * gaps, so the chunk-gap timeout would fire mid-turn and tell the app the turn
+ * is done while the agent is still working. For those transports the only idle
+ * comes from the authoritative `prompt()` resolution in AcpBackend.sendPrompt.
+ */
+export function shouldSuppressHeuristicIdle(ctx: HandlerContext): boolean {
+  return ctx.transport.endsTurnOnPromptResolution?.() === true;
+}
+
+/**
  * Handle agent_message_chunk update (text output from model)
  */
 export function handleAgentMessageChunk(
@@ -184,16 +233,21 @@ export function handleAgentMessageChunk(
     // Reset idle timeout - more chunks are coming
     ctx.clearIdleTimeout();
 
-    // Set timeout to emit 'idle' after a short delay when no more chunks arrive
-    const idleTimeoutMs = ctx.transport.getIdleTimeout?.() ?? DEFAULT_IDLE_TIMEOUT_MS;
-    ctx.setIdleTimeout(() => {
-      if (ctx.activeToolCalls.size === 0) {
-        logger.debug('[AcpBackend] No more chunks received, emitting idle status');
-        ctx.emitIdleStatus();
-      } else {
-        logger.debug(`[AcpBackend] Delaying idle status - ${ctx.activeToolCalls.size} active tool calls`);
-      }
-    }, idleTimeoutMs);
+    // Set timeout to emit 'idle' after a short delay when no more chunks arrive.
+    // Skipped for transports with deterministic turn-end (see
+    // shouldSuppressHeuristicIdle) so bursty agents like Copilot are not marked
+    // idle during their inter-burst think/tool gaps.
+    if (!shouldSuppressHeuristicIdle(ctx)) {
+      const idleTimeoutMs = ctx.transport.getIdleTimeout?.() ?? DEFAULT_IDLE_TIMEOUT_MS;
+      ctx.setIdleTimeout(() => {
+        if (ctx.activeToolCalls.size === 0) {
+          logger.debug('[AcpBackend] No more chunks received, emitting idle status');
+          ctx.emitIdleStatus();
+        } else {
+          logger.debug(`[AcpBackend] Delaying idle status - ${ctx.activeToolCalls.size} active tool calls`);
+        }
+      }, idleTimeoutMs);
+    }
   }
 
   return { handled: true };
@@ -275,7 +329,7 @@ export function startToolCall(
       ctx.toolCallStartTimes.delete(toolCallId);
       ctx.toolCallTimeouts.delete(toolCallId);
 
-      if (ctx.activeToolCalls.size === 0) {
+      if (ctx.activeToolCalls.size === 0 && !shouldSuppressHeuristicIdle(ctx)) {
         logger.debug('[AcpBackend] No more active tool calls after timeout, emitting idle status');
         ctx.emitIdleStatus();
       }
@@ -295,6 +349,16 @@ export function startToolCall(
 
   // Parse args and emit tool-call event
   const args = parseArgsFromContent(update.content);
+
+  // Include rawInput from Copilot-style tool calls (command, description, etc.)
+  if (update.rawInput && typeof update.rawInput === 'object') {
+    args.rawInput = update.rawInput as Record<string, unknown>;
+  }
+
+  // Include title from the update if present
+  if (typeof update.title === 'string') {
+    args.title = update.title;
+  }
 
   // Extract locations if present
   if (update.locations && Array.isArray(update.locations)) {
@@ -345,11 +409,14 @@ export function completeToolCall(
     callId: toolCallId,
   });
 
-  // If no more active tool calls, emit idle
+  // If no more active tool calls, emit idle (unless the transport ends the turn
+  // deterministically on prompt() resolution — see shouldSuppressHeuristicIdle).
   if (ctx.activeToolCalls.size === 0) {
     ctx.clearIdleTimeout();
-    logger.debug('[AcpBackend] All tool calls completed, emitting idle status');
-    ctx.emitIdleStatus();
+    if (!shouldSuppressHeuristicIdle(ctx)) {
+      logger.debug('[AcpBackend] All tool calls completed, emitting idle status');
+      ctx.emitIdleStatus();
+    }
   }
 }
 
@@ -423,11 +490,14 @@ export function failToolCall(
     callId: toolCallId,
   });
 
-  // If no more active tool calls, emit idle
+  // If no more active tool calls, emit idle (unless the transport ends the turn
+  // deterministically on prompt() resolution — see shouldSuppressHeuristicIdle).
   if (ctx.activeToolCalls.size === 0) {
     ctx.clearIdleTimeout();
-    logger.debug('[AcpBackend] All tool calls completed/failed, emitting idle status');
-    ctx.emitIdleStatus();
+    if (!shouldSuppressHeuristicIdle(ctx)) {
+      logger.debug('[AcpBackend] All tool calls completed/failed, emitting idle status');
+      ctx.emitIdleStatus();
+    }
   }
 }
 
@@ -454,6 +524,14 @@ export function handleToolCallUpdate(
       toolCallCountSincePrompt++;
       startToolCall(toolCallId, toolKind, update, ctx, 'tool_call_update');
     } else {
+      // Emit intermediate tool output (terminal text, file content, etc.)
+      const outputText = extractToolUpdateText(update.content) ?? extractToolUpdateText(update.rawOutput);
+      if (outputText) {
+        ctx.emit({
+          type: 'terminal-output',
+          data: outputText,
+        });
+      }
       logger.debug(`[AcpBackend] Tool call ${toolCallId} already tracked, status: ${status}`);
     }
   } else if (status === 'completed') {

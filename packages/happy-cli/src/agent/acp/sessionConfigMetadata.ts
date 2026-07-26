@@ -3,6 +3,11 @@ import type { SessionConfigOption, SessionModeState, SessionModelState } from '@
 
 type SupportedCategory = 'mode' | 'model' | 'thought_level';
 
+// Categories surfaced to the app as selectable session config. The ACP
+// "permissions" category (e.g. Copilot's `allow_all` on/off toggle) is
+// intentionally omitted: it is redundant with the Autopilot operating mode
+// (which enables allow-all) and the bypass/yolo permission-mode auto-approval
+// handled in runAcp.ts, so exposing it would duplicate the mode selector.
 const SUPPORTED_CATEGORIES = new Set<SupportedCategory>(['mode', 'model', 'thought_level']);
 
 type MetadataOption = {

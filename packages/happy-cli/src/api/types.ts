@@ -139,6 +139,7 @@ export const MachineMetadataSchema = z.object({
     codex: z.boolean(),
     gemini: z.boolean(),
     openclaw: z.boolean(),
+    copilot: z.boolean(),
     detectedAt: z.number(),
   }).optional(),
   resumeSupport: z.object({
@@ -188,8 +189,12 @@ export type Machine = {
  */
 export const MessageMetaSchema = z.object({
   sentFrom: z.string().optional(), // Source identifier
-  permissionMode: z.enum(['default', 'acceptEdits', 'bypassPermissions', 'plan', 'read-only', 'safe-yolo', 'yolo']).optional(), // Permission mode for this message
+  permissionMode: z.union([
+    z.enum(['default', 'acceptEdits', 'bypassPermissions', 'plan', 'read-only', 'safe-yolo', 'yolo']),
+    z.string(), // Forward compatibility: ACP agents (e.g. Copilot) send operating-mode ids like ".../session-modes#agent"
+  ]).optional(), // Permission mode for this message
   model: z.string().nullable().optional(), // Model name for this message (null = reset)
+  effort: z.string().nullable().optional(), // Reasoning/thinking effort level for this message (null = reset)
   fallbackModel: z.string().nullable().optional(), // Fallback model for this message (null = reset)
   customSystemPrompt: z.string().nullable().optional(), // Custom system prompt for this message (null = reset)
   appendSystemPrompt: z.string().nullable().optional(), // Append to system prompt for this message (null = reset)
@@ -302,6 +307,7 @@ export type Metadata = {
   machineId?: string,
   claudeSessionId?: string, // Claude Code session ID
   codexThreadId?: string, // Codex app-server thread ID
+  acpSessionId?: string, // ACP agent session ID (e.g. Copilot) for resume
   tools?: string[],
   slashCommands?: string[],
   mcpServers?: Array<{ name: string; status: string }>,

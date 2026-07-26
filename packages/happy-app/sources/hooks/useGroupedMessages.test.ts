@@ -81,6 +81,41 @@ describe('useGroupedMessages', () => {
         ]);
     });
 
+    it('hides thinking by default but shows it when showThinking is set (Copilot)', () => {
+        const messages: Message[] = [
+            {
+                kind: 'agent-text',
+                id: 'answer',
+                localId: null,
+                createdAt: 4,
+                text: 'the final answer',
+            },
+            {
+                kind: 'agent-text',
+                id: 'thinking',
+                localId: null,
+                createdAt: 3,
+                text: '*inner reasoning*',
+                isThinking: true,
+            },
+            {
+                kind: 'user-text',
+                id: 'user',
+                localId: null,
+                createdAt: 1,
+                text: 'hi',
+            },
+        ];
+
+        const hidden = groupMessagesForDisplay(messages, true, { collapseCurrentTurn: false });
+        expect(hidden.some((item) => item.type === 'message' && item.message.id === 'thinking')).toBe(false);
+
+        const shown = groupMessagesForDisplay(messages, true, { collapseCurrentTurn: false, showThinking: true });
+        expect(shown.some((item) => item.type === 'message' && item.message.id === 'thinking')).toBe(true);
+        // The real answer is still present and not mistaken for the thinking block.
+        expect(shown.some((item) => item.type === 'message' && item.message.id === 'answer')).toBe(true);
+    });
+
     it('groups only adjacent tool calls between text messages', () => {
         const messages: Message[] = [
             {

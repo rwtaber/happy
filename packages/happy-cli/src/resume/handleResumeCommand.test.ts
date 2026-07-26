@@ -65,6 +65,61 @@ describe('buildResumeLaunch', () => {
         });
     });
 
+    it('builds a Copilot resume command from flavor + acpSessionId', () => {
+        expect(buildResumeLaunch({
+            id: 'session-4',
+            active: false,
+            metadata: {
+                path: '/tmp/copilot-repo',
+                flavor: 'copilot',
+                acpSessionId: 'acp-abc-123',
+                host: 'localhost',
+                homeDir: '/tmp',
+                happyHomeDir: '/tmp/.happy',
+                happyLibDir: '/tmp/happy',
+                happyToolsDir: '/tmp/happy/tools',
+            },
+        })).toEqual({
+            cwd: '/tmp/copilot-repo',
+            args: ['copilot', '--resume', 'acp-abc-123'],
+        });
+    });
+
+    it('detects the Copilot flavor from acpSessionId alone and forwards startedBy', () => {
+        expect(buildResumeLaunch({
+            id: 'session-5',
+            active: false,
+            metadata: {
+                path: '/tmp/copilot-repo',
+                acpSessionId: 'acp-xyz-789',
+                host: 'localhost',
+                homeDir: '/tmp',
+                happyHomeDir: '/tmp/.happy',
+                happyLibDir: '/tmp/happy',
+                happyToolsDir: '/tmp/happy/tools',
+            },
+        }, { startedBy: 'daemon' })).toEqual({
+            cwd: '/tmp/copilot-repo',
+            args: ['copilot', '--started-by', 'daemon', '--resume', 'acp-xyz-789'],
+        });
+    });
+
+    it('rejects a Copilot session missing its acp session id', () => {
+        expect(() => buildResumeLaunch({
+            id: 'session-6',
+            active: false,
+            metadata: {
+                path: '/tmp/copilot-repo',
+                flavor: 'copilot',
+                host: 'localhost',
+                homeDir: '/tmp',
+                happyHomeDir: '/tmp/.happy',
+                happyLibDir: '/tmp/happy',
+                happyToolsDir: '/tmp/happy/tools',
+            },
+        })).toThrow('Happy session session-6 is missing its Copilot session ID.');
+    });
+
     it('rejects unsupported flavors', () => {
         expect(() => buildResumeLaunch({
             id: 'session-3',

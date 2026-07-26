@@ -82,9 +82,10 @@ const ChatListInternal = React.memo((props: {
         session?.agentState?.requests && Object.keys(session.agentState.requests).length > 0,
     );
     const collapseCurrentTurn = session?.thinking !== true && !hasPendingPermission;
+    const showThinking = session?.metadata?.flavor === 'copilot';
     const groupingOptions = React.useMemo(
-        () => ({ collapseCurrentTurn }),
-        [collapseCurrentTurn],
+        () => ({ collapseCurrentTurn, showThinking }),
+        [collapseCurrentTurn, showThinking],
     );
     const displayItems = useGroupedMessages(props.messages, groupToolCalls, groupingOptions);
 

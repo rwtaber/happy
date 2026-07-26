@@ -42,26 +42,28 @@ export type DisplayItem = TextItem | ToolGroupItem | AgentWorkGroupItem;
 export function useGroupedMessages(
     messages: Message[],
     enabled: boolean = true,
-    options: { collapseCurrentTurn?: boolean } = {},
+    options: { collapseCurrentTurn?: boolean; showThinking?: boolean } = {},
 ): DisplayItem[] {
     const collapseCurrentTurn = options.collapseCurrentTurn ?? true;
+    const showThinking = options.showThinking ?? false;
     return React.useMemo(() => {
-        return groupMessagesForDisplay(messages, enabled, { collapseCurrentTurn });
-    }, [messages, enabled, collapseCurrentTurn]);
+        return groupMessagesForDisplay(messages, enabled, { collapseCurrentTurn, showThinking });
+    }, [messages, enabled, collapseCurrentTurn, showThinking]);
 }
 
 export function groupMessagesForDisplay(
     messages: Message[],
     enabled: boolean = true,
-    options: { collapseCurrentTurn?: boolean } = {},
+    options: { collapseCurrentTurn?: boolean; showThinking?: boolean } = {},
 ): DisplayItem[] {
     if (!enabled) {
         return messages.map((msg) => ({ type: 'message', id: msg.id, message: msg } as TextItem));
     }
 
     const collapseCurrentTurn = options.collapseCurrentTurn ?? true;
+    const showThinking = options.showThinking ?? false;
     const turnOf = getTurnAssignments(messages);
-    const workGroups = collectAgentWorkGroups(messages, turnOf, collapseCurrentTurn);
+    const workGroups = collectAgentWorkGroups(messages, turnOf, collapseCurrentTurn, showThinking);
     const hiddenWorkIndexes = new Set<number>();
     const workGroupByOldestIndex = new Map<number, AgentWorkGroupItem>();
 
@@ -74,11 +76,11 @@ export function groupMessagesForDisplay(
 
     const visibleForToolGrouping = (msg: Message, index: number): boolean => {
         if (hiddenWorkIndexes.has(index)) return false;
-        if (isInvisibleMessage(msg) || isUserAttachment(msg)) return false;
+        if (isInvisibleMessage(msg, showThinking) || isUserAttachment(msg)) return false;
         return msg.kind === 'tool-call';
     };
 
-    const toolRuns = collectToolRuns(messages, visibleForToolGrouping);
+    const toolRuns = collectToolRuns(messages, visibleForToolGrouping, showThinking);
 
     // Build display items — groups are emitted at their oldest hidden member
     // so the visual order remains user message → collapsed work → final answer.
@@ -86,7 +88,7 @@ export function groupMessagesForDisplay(
     for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
 
-        if (isInvisibleMessage(msg)) continue;
+        if (isInvisibleMessage(msg, showThinking)) continue;
 
         if (hiddenWorkIndexes.has(i)) {
             const workGroup = workGroupByOldestIndex.get(i);
@@ -135,24 +137,25 @@ export function groupMessagesForDisplay(
 export function groupToolCallsForDisplay(
     messages: Message[],
     enabled: boolean = true,
-    options: { groupSingleToolCalls?: boolean } = {},
+    options: { groupSingleToolCalls?: boolean; showThinking?: boolean } = {},
 ): ToolDisplayItem[] {
     if (!enabled) {
         return messages.map((msg) => ({ type: 'message', id: msg.id, message: msg } as TextItem));
     }
 
     const groupSingleToolCalls = options.groupSingleToolCalls ?? false;
+    const showThinking = options.showThinking ?? false;
     const toolRuns = collectToolRuns(messages, (msg) => {
         if (msg.kind !== 'tool-call') return false;
-        if (isInvisibleMessage(msg) || isUserAttachment(msg)) return false;
+        if (isInvisibleMessage(msg, showThinking) || isUserAttachment(msg)) return false;
         return true;
-    });
+    }, showThinking);
 
     const result: ToolDisplayItem[] = [];
     for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
 
-        if (isInvisibleMessage(msg)) continue;
+        if (isInvisibleMessage(msg, showThinking)) continue;
 
         if (isUserAttachment(msg)) {
             result.push({ type: 'message', id: msg.id, message: msg });
@@ -204,6 +207,7 @@ function getTurnAssignments(messages: Message[]): number[] {
 function collectToolRuns(
     messages: Message[],
     shouldInclude: (msg: Message, index: number) => boolean,
+    showThinking: boolean = false,
 ): Map<number, { msgs: Message[]; oldestIdx: number }> {
     const runsByIndex = new Map<number, { msgs: Message[]; oldestIdx: number }>();
     let current: { indexes: number[]; msgs: Message[] } | null = null;
@@ -224,7 +228,7 @@ function collectToolRuns(
     for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
         if (!shouldInclude(msg, i)) {
-            if (!isInvisibleMessage(msg)) {
+            if (!isInvisibleMessage(msg, showThinking)) {
                 flush();
             }
             continue;
@@ -240,7 +244,7 @@ function collectToolRuns(
     return runsByIndex;
 }
 
-function collectAgentWorkGroups(messages: Message[], turnOf: number[], collapseCurrentTurn: boolean): Array<{
+function collectAgentWorkGroups(messages: Message[], turnOf: number[], collapseCurrentTurn: boolean, showThinking: boolean = false): Array<{
     item: AgentWorkGroupItem;
     hiddenIndexes: number[];
     oldestIdx: number;
@@ -268,11 +272,16 @@ function collectAgentWorkGroups(messages: Message[], turnOf: number[], collapseC
         const visibleAgentIndexes = indexes.filter((index) => {
             const msg = messages[index];
             if (msg.kind === 'user-text') return false;
-            if (isInvisibleMessage(msg) || isUserAttachment(msg)) return false;
+            if (isInvisibleMessage(msg, showThinking) || isUserAttachment(msg)) return false;
             return true;
         });
 
-        const finalTextIndex = visibleAgentIndexes.find((index) => messages[index].kind === 'agent-text');
+        // The final answer is the first non-thinking agent text; thinking blocks
+        // (visible only for Copilot) must not be mistaken for it.
+        const finalTextIndex = visibleAgentIndexes.find((index) => {
+            const m = messages[index];
+            return m.kind === 'agent-text' && !m.isThinking;
+        });
         if (finalTextIndex === undefined) continue;
 
         const hiddenIndexes = visibleAgentIndexes.filter((index) => index > finalTextIndex);
@@ -303,15 +312,16 @@ function collectAgentWorkGroups(messages: Message[], turnOf: number[], collapseC
 }
 
 /** Returns true for messages that render as null and should be excluded entirely */
-function isInvisibleMessage(msg: Message): boolean {
+function isInvisibleMessage(msg: Message, showThinking: boolean = false): boolean {
     // Hidden tools (ToolSearch, CodexReasoning, etc.)
     if (msg.kind === 'tool-call') {
         const known = knownTools[msg.tool.name as keyof typeof knownTools] as any;
         return known?.hidden === true;
     }
-    // Thinking messages render as null in MessageView
     if (msg.kind === 'agent-text') {
-        if (msg.isThinking) return true;
+        // Thinking is hidden by default (rendered as null in MessageView); when
+        // showThinking is set (Copilot) it renders as a collapsible "Thinking…" block.
+        if (msg.isThinking) return !showThinking;
         if (msg.text.trim().length === 0) return true;
     }
     return false;

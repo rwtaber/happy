@@ -43,7 +43,7 @@ graph TB
 - **API client:** `src/api` handles HTTP + Socket.IO, encryption, and RPC.
 - **Daemon:** `src/daemon` runs in the background, spawns sessions, and maintains machine state.
 - **Persistence/config:** `src/persistence.ts` + `src/configuration.ts` manage local state in `~/.happy`.
-- **Agents:** `src/claude`, `src/codex`, `src/gemini` provide provider-specific runners.
+- **Agents:** `src/claude`, `src/codex`, `src/gemini`, and `src/copilot` provide provider-specific runners. `gemini`, `opencode`, and `copilot` share the generic ACP runner (`src/agent/acp`); see [copilot.md](copilot.md).
 
 ## CLI entry flow
 
@@ -72,7 +72,7 @@ flowchart TD
 ```
 
 `src/index.ts` is the CLI router. It:
-- Parses subcommands (`doctor`, `auth`, `connect`, `codex`, `gemini`, and default run flows).
+- Parses subcommands (`doctor`, `auth`, `connect`, `codex`, `gemini`, `copilot`, and default run flows).
 - Ensures auth and machine setup when needed (`authAndSetupMachineIfNeeded`).
 - Starts the daemon or runs an agent directly based on subcommand/context.
 

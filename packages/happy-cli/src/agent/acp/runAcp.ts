@@ -4,7 +4,8 @@ import { ApiClient } from '@/api/api';
 import type { ApiSessionClient } from '@/api/apiSession';
 import type { AgentMessage } from '@/agent/core';
 import { AcpBackend, type AcpPermissionHandler } from './AcpBackend';
-import { DefaultTransport } from '@/agent/transport';
+import { DefaultTransport, CopilotTransport } from '@/agent/transport';
+import type { TransportHandler } from '@/agent/transport';
 import { AcpSessionManager } from './AcpSessionManager';
 import type { SessionEnvelope } from '@slopus/happy-wire';
 import { logger } from '@/ui/logger';
@@ -17,6 +18,7 @@ import { setupOfflineReconnection } from '@/utils/setupOfflineReconnection';
 import { notifyDaemonSessionStarted } from '@/daemon/controlClient';
 import { encodeBase64 } from '@/api/encryption';
 import { registerKillSessionHandler } from '@/claude/registerKillSessionHandler';
+import { trimIdent } from '@/utils/trimIdent';
 import { startHappyServer } from '@/claude/utils/startHappyServer';
 import { projectPath } from '@/projectPath';
 import { BasePermissionHandler, type PermissionResult } from '@/utils/BasePermissionHandler';
@@ -31,6 +33,23 @@ import {
 import type { SessionConfigOption, SessionModeState, SessionModelState } from '@agentclientprotocol/sdk';
 
 const TURN_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * How long an ACP session may take to start before we post a one-time notice.
+ * Startup can be slow when the workspace has many custom agents/skills/
+ * instructions or heavy MCP servers to load (worse on network mounts), during
+ * which the user's first message waits in the queue.
+ */
+const ACP_SLOW_STARTUP_NOTICE_MS = 8_000;
+
+/**
+ * Appended to the first user prompt of an ACP session so the agent names the
+ * chat via the happy MCP server's `change_title` tool (mirrors how Claude/Codex/
+ * Gemini instruct their agents to rename the conversation).
+ */
+const ACP_CHANGE_TITLE_INSTRUCTION = trimIdent(`
+  When you start working on this chat, call the "change_title" tool (provided by the "happy" MCP server) to set a short, descriptive title that represents the task. If the topic changes significantly later, call it again to update the title.
+`);
 const ACP_EVENT_PREVIEW_CHARS = 240;
 const ACP_RAW_PREVIEW_CHARS = 2000;
 const ACP_COLOR_RESET = '\u001b[0m';
@@ -269,6 +288,7 @@ function formatEnvelopeForServerLog(agentName: string, envelope: SessionEnvelope
 type AcpSwitchMode = {
   permissionMode?: string;
   model?: string | null;
+  effort?: string | null;
 };
 
 type AcpSelectableOption = {
@@ -321,7 +341,7 @@ function flattenSelectOptions(options: unknown): AcpSelectableOption[] {
 
 function extractConfigSelector(
   configOptions: SessionConfigOption[],
-  category: 'mode' | 'model',
+  category: 'mode' | 'model' | 'thought_level',
 ): AcpConfigSelector | null {
   const optionMatchesCategory = (option: SessionConfigOption): boolean => {
     if (option.category === category) {
@@ -332,6 +352,10 @@ function extractConfigSelector(
     const name = normalizeComparable(option.name);
     if (category === 'model') {
       return id.includes('model') || name.includes('model');
+    }
+    if (category === 'thought_level') {
+      return id.includes('effort') || id.includes('thought') || id.includes('reasoning')
+        || name.includes('effort') || name.includes('thinking') || name.includes('reasoning');
     }
     return id.includes('mode') || id.includes('permission') || name.includes('mode') || name.includes('permission');
   };
@@ -352,6 +376,33 @@ function extractConfigSelector(
 function normalizeComparable(value: string): string {
   return value.trim().toLowerCase();
 }
+
+const BYPASS_PERMISSION_MODES = new Set(['yolo', 'bypasspermissions', 'safe-yolo', 'dontask', 'allow-all', 'allowall']);
+
+/**
+ * Whether a requested permission mode means "run tools without asking".
+ * Covers Happy's cross-agent mode names (yolo/bypassPermissions/safe-yolo/...)
+ * and ACP autopilot mode ids, which enable allow-all.
+ */
+function isBypassPermissionMode(mode: string): boolean {
+  const normalized = normalizeComparable(mode);
+  if (BYPASS_PERMISSION_MODES.has(normalized)) {
+    return true;
+  }
+  return normalized.includes('autopilot') || normalized.includes('bypass') || normalized.includes('yolo');
+}
+
+/**
+ * Initial permission mode applied per ACP agent before any user message. Copilot
+ * defaults to bypass (mirrors Claude/Codex defaulting to yolo) so the first turn
+ * honors the app's default even when the composer omits an explicit mode; an
+ * explicit mode from a user message overrides it before the prompt is sent.
+ */
+const DEFAULT_INITIAL_PERMISSION_MODE: Record<string, string | undefined> = {
+  // Autopilot = Copilot's allow-all/auto-run operating mode; applied on the first
+  // turn when the composer sends no explicit mode, so allow-all works immediately.
+  copilot: 'https://agentclientprotocol.com/protocol/session-modes#autopilot',
+};
 
 function resolveRequestedCode(options: AcpSelectableOption[], requested: string): string | null {
   for (const option of options) {
@@ -406,6 +457,7 @@ function resolveRequestedLegacyModelCode(models: SessionModelState, requested: s
 
 class GenericAcpPermissionHandler extends BasePermissionHandler implements AcpPermissionHandler {
   private readonly logPrefix: string;
+  private autoApprove = false;
 
   constructor(session: ApiSessionClient, agentName: string) {
     super(session);
@@ -416,7 +468,18 @@ class GenericAcpPermissionHandler extends BasePermissionHandler implements AcpPe
     return this.logPrefix;
   }
 
+  setAutoApprove(value: boolean): void {
+    if (this.autoApprove !== value) {
+      logger.debug(`${this.logPrefix} Auto-approve tool permissions: ${value}`);
+    }
+    this.autoApprove = value;
+  }
+
   async handleToolCall(toolCallId: string, toolName: string, input: unknown): Promise<PermissionResult> {
+    if (this.autoApprove) {
+      logger.debug(`${this.logPrefix} Auto-approving tool ${toolName} (${toolCallId}); permission prompts bypassed`);
+      return { decision: 'approved' };
+    }
     return new Promise<PermissionResult>((resolve, reject) => {
       this.pendingRequests.set(toolCallId, {
         resolve,
@@ -436,14 +499,24 @@ type PendingTurn = {
   timeout: NodeJS.Timeout;
 };
 
-function resolveSessionFlavor(agentName: string): 'gemini' | 'opencode' | 'acp' {
+function resolveSessionFlavor(agentName: string): 'gemini' | 'opencode' | 'copilot' | 'acp' {
   if (agentName === 'gemini') {
     return 'gemini';
   }
   if (agentName === 'opencode') {
     return 'opencode';
   }
+  if (agentName === 'copilot') {
+    return 'copilot';
+  }
   return 'acp';
+}
+
+function resolveTransportHandler(agentName: string): TransportHandler {
+  if (agentName === 'copilot') {
+    return new CopilotTransport();
+  }
+  return new DefaultTransport(agentName);
 }
 
 export async function runAcp(opts: {
@@ -452,6 +525,8 @@ export async function runAcp(opts: {
   command: string;
   args: string[];
   startedBy?: 'daemon' | 'terminal';
+  /** Resume this existing agent session id instead of starting a new one. */
+  resumeSessionId?: string;
   verbose?: boolean;
 }): Promise<void> {
   const verbose = opts.verbose === true;
@@ -518,10 +593,12 @@ export async function runAcp(opts: {
   permissionHandler.reset('Previous CLI process exited before responding');
   const sessionManager = new AcpSessionManager();
   const messageQueue = new MessageQueue2<AcpSwitchMode>((mode) => hashObject(mode));
-  let currentPermissionMode: string | undefined;
+  let currentPermissionMode: string | undefined = DEFAULT_INITIAL_PERMISSION_MODE[opts.agentName];
   let currentModel: string | null | undefined;
+  let currentEffort: string | null | undefined;
   let modeSelector: AcpConfigSelector | null = null;
   let modelSelector: AcpConfigSelector | null = null;
+  let effortSelector: AcpConfigSelector | null = null;
   let legacyModes: SessionModeState | null = null;
   let legacyModels: SessionModelState | null = null;
   let sawSlashCommands = false;
@@ -531,6 +608,9 @@ export async function runAcp(opts: {
   const happyServer = await startHappyServer(session);
   const mcpServers = {
     happy: {
+      // Native HTTP endpoint: used for agents that advertise MCP http support
+      // (e.g. Copilot). Agents that only support stdio use the bridge command.
+      url: happyServer.url,
       command: join(projectPath(), 'bin', 'happy-mcp.mjs'),
       args: ['--url', happyServer.url],
     },
@@ -541,11 +621,15 @@ export async function runAcp(opts: {
     cwd: process.cwd(),
     command: opts.command,
     args: opts.args,
+    resumeSessionId: opts.resumeSessionId,
     mcpServers,
     permissionHandler,
-    transportHandler: new DefaultTransport(opts.agentName),
+    transportHandler: resolveTransportHandler(opts.agentName),
+    hasChangeTitleInstruction: (prompt: string) => prompt.includes('change_title'),
     verbose,
   });
+
+  let isFirstPrompt = true;
 
   let thinking = false;
   let acpSessionId: string | null = null;
@@ -602,6 +686,11 @@ export async function runAcp(opts: {
     if (!requestedMode) {
       return;
     }
+
+    // Honor Happy's bypass/yolo permission modes even when the ACP agent does
+    // not advertise a matching operating mode: auto-approve tool permission
+    // requests locally so the agent runs without prompting.
+    permissionHandler.setAutoApprove(isBypassPermissionMode(requestedMode));
 
     if (modeSelector) {
       const resolved = resolveRequestedCode(modeSelector.options, requestedMode);
@@ -684,6 +773,25 @@ export async function runAcp(opts: {
     }
   };
 
+  // Apply the ACP "thought_level" config option (e.g. Copilot's reasoning_effort).
+  const switchEffortIfRequested = async (requestedEffort: string): Promise<void> => {
+    if (!requestedEffort || !effortSelector) {
+      return;
+    }
+    const resolved = resolveRequestedCode(effortSelector.options, requestedEffort);
+    if (!resolved) {
+      logger.debug(`[${opts.agentName}] Ignoring unknown ACP effort request: ${requestedEffort}`);
+      return;
+    }
+    if (resolved === effortSelector.currentCode) {
+      return;
+    }
+    const switched = await backend.setSessionConfigOption(effortSelector.configId, resolved);
+    if (switched) {
+      effortSelector.currentCode = resolved;
+    }
+  };
+
   const onBackendMessage = (msg: AgentMessage) => {
     if (verbose) {
       logAcp('muted', `Outgoing raw backend message from ${opts.agentName}: ${formatUnknownForConsole(msg, ACP_RAW_PREVIEW_CHARS)}`);
@@ -722,6 +830,7 @@ export async function runAcp(opts: {
 
         modeSelector = extractConfigSelector(configOptions, 'mode');
         modelSelector = extractConfigSelector(configOptions, 'model');
+        effortSelector = extractConfigSelector(configOptions, 'thought_level');
         if (verbose) {
           if (modeSelector) {
             sawModes = true;
@@ -830,11 +939,29 @@ export async function runAcp(opts: {
 
   backend.onMessage(onBackendMessage);
 
-  session.onUserMessage((message) => {
-    if (!message.content.text) {
-      return;
-    }
+  // Collect image/file attachments the same way Claude and Codex do: each file
+  // event downloads and decrypts in the background; drainAttachmentsForUserMessage
+  // claims the ready set when the next prompt is sent.
+  session.onFileEvent((fileEvent) => {
+    const ev = fileEvent.content.data.ev;
+    logger.debug(`[${opts.agentName}] File event received: ${ev.name} (${ev.size} bytes, ref: ${ev.ref})`);
+    const downloadPromise = (async (): Promise<{ data: Uint8Array; mimeType: string; name: string } | null> => {
+      try {
+        const decrypted = await session.downloadAndDecryptAttachment(ev.ref);
+        if (!decrypted) {
+          logger.debug(`[${opts.agentName}] Failed to decrypt attachment: ${ev.name}`);
+          return null;
+        }
+        return { data: decrypted, mimeType: ev.mimeType ?? 'image/jpeg', name: ev.name };
+      } catch (error) {
+        logger.debug(`[${opts.agentName}] Failed to download attachment: ${ev.name}`, { error });
+        return null;
+      }
+    })();
+    session.trackAttachmentDownload(downloadPromise);
+  });
 
+  session.onUserMessage((message) => {
     if (typeof message.meta?.permissionMode === 'string') {
       currentPermissionMode = message.meta.permissionMode;
       logger.debug(`[${opts.agentName}] Requested ACP permission mode: ${currentPermissionMode}`);
@@ -845,9 +972,27 @@ export async function runAcp(opts: {
       logger.debug(`[${opts.agentName}] Requested ACP model: ${currentModel ?? 'null'}`);
     }
 
+    if (message.meta && Object.prototype.hasOwnProperty.call(message.meta, 'effort')) {
+      currentEffort = message.meta.effort ?? null;
+      logger.debug(`[${opts.agentName}] Requested ACP effort: ${currentEffort ?? 'null'}`);
+    }
+
+    if (!message.content.text) {
+      // Mode/model/effort change only (no text prompt) — enqueue a config-only item
+      // so the main loop applies the change serially, after any in-flight turn and
+      // after startSession completes, preventing races.
+      messageQueue.push('', {
+        permissionMode: currentPermissionMode,
+        model: currentModel,
+        effort: currentEffort,
+      });
+      return;
+    }
+
     messageQueue.push(message.content.text, {
       permissionMode: currentPermissionMode,
       model: currentModel,
+      effort: currentEffort,
     });
   });
   session.keepAlive(thinking, 'remote');
@@ -878,9 +1023,41 @@ export async function runAcp(opts: {
     await handleAbort();
   });
 
+  // Show the session as busy while the ACP agent starts, and post a one-time
+  // notice if startup runs long — otherwise a slow-to-initialize workspace
+  // (large repo, many agents/skills, heavy MCP servers) looks unresponsive
+  // while the user's first message sits queued behind startSession().
+  let startupIndicatorActive = true;
+  thinking = true;
+  session.keepAlive(true, 'remote');
+  const slowStartupNotice = setTimeout(() => {
+    logAcp('muted', `Still starting ${opts.agentName} session (loading workspace)...`);
+    session.sendSessionEvent({
+      type: 'message',
+      message: `Starting the ${opts.agentName} session — loading workspace configuration. This can take a while for large repositories or ones with many agents, skills, or MCP servers.`,
+    });
+  }, ACP_SLOW_STARTUP_NOTICE_MS);
+  const finishStartupIndicator = () => {
+    if (!startupIndicatorActive) {
+      return;
+    }
+    startupIndicatorActive = false;
+    clearTimeout(slowStartupNotice);
+    thinking = false;
+    session.keepAlive(false, 'remote');
+  };
+
   try {
     const started = await backend.startSession();
+    finishStartupIndicator();
     acpSessionId = started.sessionId;
+    if (started.agentSessionId) {
+      // Persist the agent's own session id so `happy resume` can reload it.
+      session.updateMetadata((currentMetadata) => ({
+        ...currentMetadata,
+        acpSessionId: started.agentSessionId,
+      }));
+    }
     if (verbose) {
       if (!sawSlashCommands) {
         logAcp('muted', `Outgoing slash commands from ${opts.agentName}: not reported yet`);
@@ -920,8 +1097,18 @@ export async function runAcp(opts: {
         if (typeof batch.mode.model === 'string' && batch.mode.model.length > 0) {
           await switchModelIfRequested(batch.mode.model);
         }
-        await backend.sendPrompt(acpSessionId, batch.message);
-        await turnEnded;
+        if (typeof batch.mode.effort === 'string' && batch.mode.effort.length > 0) {
+          await switchEffortIfRequested(batch.mode.effort);
+        }
+        if (batch.message) {
+          const promptText = isFirstPrompt
+            ? `${batch.message}\n\n${ACP_CHANGE_TITLE_INSTRUCTION}`
+            : batch.message;
+          isFirstPrompt = false;
+          const attachments = await session.drainAttachmentsForUserMessage();
+          await backend.sendPrompt(acpSessionId, promptText, attachments);
+          await turnEnded;
+        }
         sendEnvelopes(sessionManager.endTurn('completed'));
         session.sendSessionEvent({ type: 'ready' });
         if (verbose) {
@@ -936,6 +1123,7 @@ export async function runAcp(opts: {
       }
     }
   } finally {
+    finishStartupIndicator();
     clearInterval(keepAliveInterval);
     reconnectionHandle?.cancel();
     clearPendingTurn(new Error('ACP runner shutting down'));

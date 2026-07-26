@@ -19,6 +19,8 @@ import {
   type InitializeRequest,
   type NewSessionRequest,
   type NewSessionResponse,
+  type LoadSessionRequest,
+  type LoadSessionResponse,
   type PromptRequest,
   type ContentBlock,
 } from '@agentclientprotocol/sdk';
@@ -195,6 +197,13 @@ export interface AcpBackendOptions {
   /** MCP servers to make available to the agent */
   mcpServers?: Record<string, McpServerConfig>;
 
+  /**
+   * When set and the agent advertises the ACP `loadSession` capability, resume
+   * this existing agent session instead of creating a new one. Falls back to a
+   * new session if resume is unsupported or fails.
+   */
+  resumeSessionId?: string;
+
   /** Optional permission handler for tool approval */
   permissionHandler?: AcpPermissionHandler;
 
@@ -312,6 +321,82 @@ async function withRetry<T>(
 }
 
 /**
+ * Build the ACP `mcpServers` payload from Happy's MCP server configs, choosing a
+ * transport per server. Prefers HTTP when the server exposes a `url` and the
+ * connected agent advertises MCP `http` support (e.g. Copilot only supports
+ * http/sse, never stdio); otherwise falls back to the stdio `command`. Servers
+ * with neither a usable HTTP endpoint nor a stdio command are skipped.
+ *
+ * Exported so the transport-selection logic can be unit-tested in isolation.
+ */
+export function buildAcpMcpServers(
+  mcpServers: Record<string, McpServerConfig> | undefined,
+  agentSupportsHttpMcp: boolean,
+): Array<Record<string, unknown>> {
+  if (!mcpServers) {
+    return [];
+  }
+  return Object.entries(mcpServers).flatMap(([name, config]): Array<Record<string, unknown>> => {
+    if (config.url && agentSupportsHttpMcp) {
+      return [{
+        type: 'http',
+        name,
+        url: config.url,
+        headers: config.headers
+          ? Object.entries(config.headers).map(([hName, hValue]) => ({ name: hName, value: hValue }))
+          : [],
+      }];
+    }
+    if (config.command) {
+      return [{
+        name,
+        command: config.command,
+        args: config.args || [],
+        env: config.env
+          ? Object.entries(config.env).map(([envName, envValue]) => ({ name: envName, value: envValue }))
+          : [],
+      }];
+    }
+    logger.debug(`[AcpBackend] Skipping MCP server "${name}": agent http support=${agentSupportsHttpMcp}, no stdio command`);
+    return [];
+  });
+}
+
+/**
+ * Build the ACP prompt content blocks for a user message: always a text block,
+ * plus one image block per image attachment when the agent advertises image
+ * support. Non-image attachments and (when unsupported) all images are dropped.
+ *
+ * Exported so the block construction can be unit-tested in isolation.
+ */
+export function buildAcpPromptBlocks(
+  prompt: string,
+  attachments: Array<{ data: Uint8Array; mimeType: string; name: string }> | undefined,
+  agentSupportsImages: boolean,
+): ContentBlock[] {
+  const blocks: ContentBlock[] = [{ type: 'text', text: prompt }];
+  if (!attachments || attachments.length === 0) {
+    return blocks;
+  }
+  if (!agentSupportsImages) {
+    logger.debug(`[AcpBackend] Agent does not support image prompts; dropping ${attachments.length} attachment(s)`);
+    return blocks;
+  }
+  for (const attachment of attachments) {
+    if (!attachment.mimeType.startsWith('image/')) {
+      logger.debug(`[AcpBackend] Skipping non-image attachment "${attachment.name}" (${attachment.mimeType})`);
+      continue;
+    }
+    blocks.push({
+      type: 'image',
+      data: Buffer.from(attachment.data).toString('base64'),
+      mimeType: attachment.mimeType,
+    });
+  }
+  return blocks;
+}
+
+/**
  * ACP backend using the official @agentclientprotocol/sdk
  */
 export class AcpBackend implements AgentBackend {
@@ -336,6 +421,15 @@ export class AcpBackend implements AgentBackend {
 
   /** Track if we just sent a prompt with change_title instruction */
   private recentPromptHadChangeTitle = false;
+
+  /** Whether the connected agent advertises MCP `http` transport support. */
+  private agentSupportsHttpMcp = false;
+
+  /** Whether the connected agent advertises the ACP `loadSession` capability. */
+  private agentSupportsLoadSession = false;
+
+  /** Whether the connected agent advertises image prompt support. */
+  private agentSupportsImages = false;
 
   /** Track tool calls count since last prompt (to identify first tool call) */
   private toolCallCountSincePrompt = 0;
@@ -771,6 +865,18 @@ export class AcpBackend implements AgentBackend {
         }
       );
       logger.debug(`[AcpBackend] Initialize completed`);
+      this.agentSupportsHttpMcp = (initializeResponse as {
+        agentCapabilities?: { mcpCapabilities?: { http?: boolean } };
+      }).agentCapabilities?.mcpCapabilities?.http === true;
+      logger.debug(`[AcpBackend] Agent MCP http support: ${this.agentSupportsHttpMcp}`);
+      this.agentSupportsLoadSession = (initializeResponse as {
+        agentCapabilities?: { loadSession?: boolean };
+      }).agentCapabilities?.loadSession === true;
+      logger.debug(`[AcpBackend] Agent loadSession support: ${this.agentSupportsLoadSession}`);
+      this.agentSupportsImages = (initializeResponse as {
+        agentCapabilities?: { promptCapabilities?: { image?: boolean } };
+      }).agentCapabilities?.promptCapabilities?.image === true;
+      logger.debug(`[AcpBackend] Agent image prompt support: ${this.agentSupportsImages}`);
       if (this.options.verbose) {
         logAcpBackendMuted(
           `Incoming initialize response from ${this.options.agentName}: ${summarizeSessionMetadataPayload(initializeResponse)}`,
@@ -778,16 +884,75 @@ export class AcpBackend implements AgentBackend {
       }
 
       // Create a new session with retry
-      const mcpServers = this.options.mcpServers
-        ? Object.entries(this.options.mcpServers).map(([name, config]) => ({
-            name,
-            command: config.command,
-            args: config.args || [],
-            env: config.env
-              ? Object.entries(config.env).map(([envName, envValue]) => ({ name: envName, value: envValue }))
-              : [],
-          }))
-        : [];
+      const mcpServers = buildAcpMcpServers(this.options.mcpServers, this.agentSupportsHttpMcp);
+
+      // Resume an existing agent session when requested and supported. On any
+      // failure we deliberately fall through to creating a new session, so resume
+      // can never leave the user worse off than starting fresh.
+      if (this.options.resumeSessionId && this.agentSupportsLoadSession) {
+        try {
+          logger.debug(`[AcpBackend] Loading existing session: ${this.options.resumeSessionId}`);
+          const loadRequest: LoadSessionRequest = {
+            sessionId: this.options.resumeSessionId,
+            cwd: this.options.cwd,
+            mcpServers: mcpServers as unknown as LoadSessionRequest['mcpServers'],
+          };
+          const loadResponse = await withRetry(
+            async () => {
+              let timeoutHandle: NodeJS.Timeout | null = null;
+              try {
+                return await Promise.race([
+                  startupFailurePromise,
+                  this.connection!.loadSession(loadRequest).then((res) => {
+                    if (timeoutHandle) {
+                      clearTimeout(timeoutHandle);
+                      timeoutHandle = null;
+                    }
+                    return res;
+                  }),
+                  new Promise<never>((_, reject) => {
+                    timeoutHandle = setTimeout(() => {
+                      reject(new Error(`Load session timeout after ${initTimeout}ms - ${this.transport.agentName} did not respond`));
+                    }, initTimeout);
+                  }),
+                ]);
+              } finally {
+                if (timeoutHandle) {
+                  clearTimeout(timeoutHandle);
+                }
+              }
+            },
+            {
+              operationName: 'LoadSession',
+              maxAttempts: RETRY_CONFIG.maxAttempts,
+              baseDelayMs: RETRY_CONFIG.baseDelayMs,
+              maxDelayMs: RETRY_CONFIG.maxDelayMs,
+              shouldRetry: (error) => !isNonRetryableStartupError(error),
+            }
+          );
+          this.acpSessionId = this.options.resumeSessionId;
+          logger.debug(`[AcpBackend] Resumed session: ${this.acpSessionId}`);
+          if (this.options.verbose) {
+            logAcpBackendMuted(
+              `Incoming loadSession response from ${this.options.agentName}: ${summarizeSessionMetadataPayload(loadResponse)}`,
+            );
+          }
+          this.emitInitialSessionMetadata(loadResponse);
+          this.emitIdleStatus();
+          if (initialPrompt) {
+            this.sendPrompt(sessionId, initialPrompt).catch((error) => {
+              logger.debug('[AcpBackend] Error sending initial prompt:', error);
+              this.emit({ type: 'status', status: 'error', detail: String(error) });
+            });
+          }
+          return { sessionId, agentSessionId: this.acpSessionId };
+        } catch (error) {
+          logger.warn(
+            `[AcpBackend] loadSession failed (${error instanceof Error ? error.message : String(error)}); creating a new session instead`,
+          );
+          // Fall through to newSession below.
+        }
+      }
 
       const newSessionRequest: NewSessionRequest = {
         cwd: this.options.cwd,
@@ -850,7 +1015,7 @@ export class AcpBackend implements AgentBackend {
         });
       }
 
-      return { sessionId };
+      return { sessionId, agentSessionId: this.acpSessionId ?? undefined };
 
     } catch (error) {
       // Log to file only, not console
@@ -895,7 +1060,9 @@ export class AcpBackend implements AgentBackend {
     };
   }
 
-  private emitInitialSessionMetadata(sessionResponse: NewSessionResponse): void {
+  private emitInitialSessionMetadata(
+    sessionResponse: Pick<NewSessionResponse, 'configOptions' | 'models' | 'modes'>,
+  ): void {
     if (Array.isArray(sessionResponse.configOptions)) {
       this.emit({
         type: 'event',
@@ -1037,7 +1204,11 @@ export class AcpBackend implements AgentBackend {
   private idleResolver: (() => void) | null = null;
   private waitingForResponse = false;
 
-  async sendPrompt(sessionId: SessionId, prompt: string): Promise<void> {
+  async sendPrompt(
+    sessionId: SessionId,
+    prompt: string,
+    attachments?: Array<{ data: Uint8Array; mimeType: string; name: string }>,
+  ): Promise<void> {
     // Check if prompt contains change_title instruction (via optional callback)
     const promptHasChangeTitle = this.options.hasChangeTitleInstruction?.(prompt) ?? false;
 
@@ -1063,22 +1234,33 @@ export class AcpBackend implements AgentBackend {
       logger.debug(`[AcpBackend] Sending prompt (length: ${prompt.length}): ${prompt.substring(0, 100)}...`);
       logger.debug(`[AcpBackend] Full prompt: ${prompt}`);
       
-      const contentBlock: ContentBlock = {
-        type: 'text',
-        text: prompt,
-      };
+      const contentBlocks = buildAcpPromptBlocks(prompt, attachments, this.agentSupportsImages);
 
       const promptRequest: PromptRequest = {
         sessionId: this.acpSessionId,
-        prompt: [contentBlock],
+        prompt: contentBlocks,
       };
 
       logger.debug(`[AcpBackend] Prompt request:`, JSON.stringify(promptRequest, null, 2));
-      await this.connection.prompt(promptRequest);
-      logger.debug('[AcpBackend] Prompt request sent to ACP connection');
-      
-      // Don't emit 'idle' here - it will be emitted after all message chunks are received
-      // The idle timeout in handleSessionUpdate will emit 'idle' after the last chunk
+      const promptResponse = await this.connection.prompt(promptRequest);
+      const stopReason = (promptResponse as { stopReason?: string } | undefined)?.stopReason;
+      logger.debug(`[AcpBackend] Prompt resolved (stopReason: ${stopReason ?? 'unknown'})`);
+
+      // The ACP prompt() response is the authoritative end-of-turn signal: a
+      // compliant agent sends it only after every session/update for the turn.
+      // For transports that opt in (e.g. Copilot), end the turn deterministically
+      // here instead of waiting for the ~2s idle chunk-gap heuristic. The heuristic
+      // remains the fallback for agents that resolve prompt() late or not at all,
+      // and transports that do not opt in keep their previous behavior. A
+      // 'cancelled' stopReason is left to the cancel() path, which emits 'stopped'.
+      if (this.transport.endsTurnOnPromptResolution?.() && stopReason !== 'cancelled') {
+        if (this.idleTimeout) {
+          clearTimeout(this.idleTimeout);
+          this.idleTimeout = null;
+        }
+        this.waitingForResponse = false;
+        this.emitIdleStatus();
+      }
 
     } catch (error) {
       logger.debug('[AcpBackend] Error sending prompt:', error);
