@@ -26,7 +26,14 @@ export function useTauriZoom() {
         const inTauri = isTauri();
         const root = document.documentElement;
 
+        // Skip zoom on touch devices (phones/tablets) — the 75% scale is meant
+        // for desktop density, and the 100vh-based body height breaks mobile
+        // keyboard handling (100vh is static on mobile browsers, so the input
+        // gets pushed below the visible viewport when the keyboard opens).
+        const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
+
         if (!inTauri) {
+            if (isTouchDevice) return;
             root.style.setProperty('--happy-app-zoom', getBrowserAppZoomValue());
             root.classList.add(WEB_ZOOM_CLASS);
             return () => {

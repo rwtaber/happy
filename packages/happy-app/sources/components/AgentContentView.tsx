@@ -17,7 +17,7 @@ export const AgentContentView: React.FC<AgentContentViewProps> = React.memo(({ i
     const state = useKeyboardState();
     return (
         <View style={{ flexBasis:0, flexGrow:1, paddingBottom: state.isVisible ? state.height - safeArea.bottom : 0 }}>
-            <View style={{ flexBasis:0, flexGrow:1 }}>
+            <View style={{ flexBasis:0, flexGrow:1, overflow: 'hidden' }}>
                 {content && (
                     <View style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }]}>
                         {content}
