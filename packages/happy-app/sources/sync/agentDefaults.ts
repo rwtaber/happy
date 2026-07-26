@@ -1,6 +1,6 @@
 import * as z from 'zod';
 
-export const agentKeys = ['claude', 'codex', 'gemini', 'openclaw', 'copilot'] as const;
+export const agentKeys = ['claude', 'codex', 'gemini', 'openclaw', 'copilot', 'agy'] as const;
 export type AgentKey = typeof agentKeys[number];
 
 export const AgentDefaultOverrideSchema = z.object({
@@ -15,6 +15,7 @@ export const AgentDefaultOverridesSchema = z.object({
     gemini: AgentDefaultOverrideSchema.optional(),
     openclaw: AgentDefaultOverrideSchema.optional(),
     copilot: AgentDefaultOverrideSchema.optional(),
+    agy: AgentDefaultOverrideSchema.optional(),
 }).passthrough().default({});
 
 export type AgentDefaultOverride = z.infer<typeof AgentDefaultOverrideSchema>;
@@ -39,10 +40,11 @@ const codeAgentDefaults: Record<AgentKey, AgentDefaultConfig> = {
     // Default to Autopilot (Copilot's allow-all/auto-run operating mode). The value
     // is the ACP session-mode id so it matches metadata.operatingModes in-session.
     copilot: { permissionMode: 'https://agentclientprotocol.com/protocol/session-modes#autopilot', modelMode: 'auto', effortLevel: 'medium' },
+    agy: { permissionMode: 'default', modelMode: 'Gemini 3.1 Pro (High)', effortLevel: null },
 };
 
 export function normalizeAgentKey(flavor: string | null | undefined): AgentKey {
-    if (flavor === 'codex' || flavor === 'gemini' || flavor === 'openclaw' || flavor === 'copilot') {
+    if (flavor === 'codex' || flavor === 'gemini' || flavor === 'openclaw' || flavor === 'copilot' || flavor === 'agy') {
         return flavor;
     }
     return 'claude';

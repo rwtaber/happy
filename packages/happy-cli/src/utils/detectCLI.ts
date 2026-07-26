@@ -9,6 +9,7 @@ export interface CLIAvailability {
   gemini: boolean;
   openclaw: boolean;
   copilot: boolean;
+  agy: boolean;
   detectedAt: number;
 }
 
@@ -44,6 +45,7 @@ export function detectCLIAvailability(): CLIAvailability {
   const claude = isCommandAvailable('claude');
   const codex = isCommandAvailable('codex');
   const gemini = isCommandAvailable('gemini');
+  const agy = isCommandAvailable('agy');
 
   // OpenClaw: present if the command exists, its config file exists, or the
   // gateway env var is set.
@@ -53,5 +55,5 @@ export function detectCLIAvailability(): CLIAvailability {
   // Copilot: standalone `copilot` CLI must be installed.
   const copilot = isCommandAvailable('copilot');
 
-  return { claude, codex, gemini, openclaw, copilot, detectedAt: Date.now() };
+  return { claude, codex, gemini, openclaw, copilot, agy, detectedAt: Date.now() };
 }

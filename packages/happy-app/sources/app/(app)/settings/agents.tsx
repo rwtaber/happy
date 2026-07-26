@@ -42,6 +42,7 @@ const agentLabels: Record<AgentKey, string> = {
     gemini: 'Gemini',
     openclaw: 'OpenClaw',
     copilot: 'GitHub Copilot',
+    agy: 'Agy',
 };
 
 function optionName(options: ModeOption[], key: string | null | undefined): string {
