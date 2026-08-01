@@ -6,7 +6,7 @@
 import { apiSocket } from './apiSocket';
 import { sync } from './sync';
 import { storage } from './storage';
-import type { AgentQuestionAnswer, MachineMetadata, SessionAgentModesPatch } from './storageTypes';
+import type { AgentQuestionAnswer, MachineMetadata, Metadata, SessionAgentModesPatch } from './storageTypes';
 import { markAgentModePushPending, clearAgentModePushPending, type AgentModeField } from './agentModesPending';
 import {
     isRigMetadata,
@@ -653,6 +653,51 @@ async function sessionUpdateAgentModesMetadata(
     throw new Error(`Failed to update session metadata after ${maxRetries} retries due to version conflicts`);
 }
 
+async function sessionUpdateMetadataPatch(
+    sessionId: string,
+    patch: Partial<Metadata>,
+    maxRetries: number = 3
+): Promise<void> {
+    const encryption = sync.encryption.getSessionEncryption(sessionId);
+    const session = storage.getState().sessions[sessionId];
+    if (!encryption || !session?.metadata) {
+        throw new Error(`Session ${sessionId} is not ready for metadata updates`);
+    }
+
+    let currentVersion = session.metadataVersion;
+    let currentMetadata: Record<string, unknown> = { ...session.metadata, ...patch };
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        const encrypted = await encryption.encryptRaw(currentMetadata);
+        const result = await apiSocket.emitWithAck<{
+            result: 'success' | 'version-mismatch' | 'error';
+            version?: number;
+            metadata?: string;
+            message?: string;
+        }>('update-metadata', {
+            sid: sessionId,
+            metadata: encrypted,
+            expectedVersion: currentVersion
+        });
+
+        if (result.result === 'success') {
+            return;
+        }
+        if (result.result === 'version-mismatch') {
+            currentVersion = result.version!;
+            const latest = await encryption.decryptRaw(result.metadata!);
+            if (!latest || typeof latest !== 'object') {
+                throw new Error('Failed to decrypt latest session metadata');
+            }
+            currentMetadata = { ...(latest as Record<string, unknown>), ...patch };
+            continue;
+        }
+        throw new Error(result.message || 'Failed to update session metadata');
+    }
+
+    throw new Error(`Failed to update session metadata after ${maxRetries} retries due to version conflicts`);
+}
+
 /**
  * Apply a per-session model / effort pick: updates local state immediately for
  * a snappy UI and pushes the pick into synced session metadata so other
@@ -964,6 +1009,78 @@ export async function sessionKill(sessionId: string): Promise<SessionKillRespons
             message: error instanceof Error ? error.message : 'Unknown error'
         };
     }
+}
+
+export async function machineStopSession(machineId: string, sessionId: string): Promise<{ success: boolean; message?: string }> {
+    try {
+        const result = await apiSocket.machineRPC<{ message: string }, { sessionId: string }>(
+            machineId,
+            'stop-session',
+            { sessionId }
+        );
+        return { success: true, message: result.message };
+    } catch (error) {
+        return {
+            success: false,
+            message: error instanceof Error ? error.message : 'Unknown error'
+        };
+    }
+}
+
+async function sessionMarkArchived(sessionId: string): Promise<{ success: boolean; message?: string }> {
+    try {
+        await sessionUpdateMetadataPatch(sessionId, {
+            lifecycleState: 'archived',
+            lifecycleStateSince: Date.now(),
+            archivedBy: 'app',
+            archiveReason: 'User terminated'
+        });
+        return { success: true };
+    } catch (error) {
+        return {
+            success: false,
+            message: error instanceof Error ? error.message : 'Unknown error'
+        };
+    }
+}
+
+export async function sessionStopAndArchive(sessionId: string, machineId?: string | null): Promise<{ success: boolean; message?: string }> {
+    const killResult = await sessionKill(sessionId);
+    if (killResult.success) {
+        return killResult;
+    }
+
+    let stopResult: { success: boolean; message?: string } = { success: false, message: 'No owning machine was available' };
+    if (machineId) {
+        stopResult = await machineStopSession(machineId, sessionId);
+    }
+
+    // A tracked-process stop sends SIGTERM. CLI signal cleanup intentionally
+    // leaves lifecycleState resumable, so the app must stamp the explicit
+    // archive intent itself and also deactivate the server row. Treat both as
+    // required: otherwise the UI can report success while leaving a resumable
+    // or still-active ghost behind.
+    const metadataResult = await sessionMarkArchived(sessionId);
+    const archiveResult = await sessionArchive(sessionId);
+    if (metadataResult.success && archiveResult.success) {
+        return {
+            success: true,
+            message: stopResult.success ? stopResult.message : undefined
+        };
+    }
+
+    const failures: string[] = [];
+    if (!metadataResult.success) {
+        failures.push(`Failed to mark session archived: ${metadataResult.message || 'Unknown error'}`);
+    }
+    if (!archiveResult.success) {
+        failures.push(`Failed to deactivate session: ${archiveResult.message || 'Unknown error'}`);
+    }
+
+    return {
+        success: false,
+        message: failures.join('; ')
+    };
 }
 
 /**

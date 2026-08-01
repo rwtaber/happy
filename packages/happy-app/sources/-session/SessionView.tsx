@@ -28,7 +28,7 @@ import { Modal } from '@/modal';
 import { voiceHooks } from '@/realtime/hooks/voiceHooks';
 import { getCurrentVoiceConversationId, getCurrentVoiceSessionDurationSeconds, startRealtimeSession, stopRealtimeSession } from '@/realtime/RealtimeSession';
 import { gitStatusSync } from '@/sync/gitStatusSync';
-import { sessionAbort, sessionGoalAction, sessionSetAgentModes, spawnSideChat, sessionKill, sessionArchive } from '@/sync/ops';
+import { sessionAbort, sessionGoalAction, sessionSetAgentModes, spawnSideChat, sessionStopAndArchive } from '@/sync/ops';
 import { storage, useIsDataReady, useLocalSetting, useRealtimeStatus, useSessionGitStatus, useSessionMessages, useSessionUsage, useSetting, useSideChatSessions } from '@/sync/storage';
 import { useSession } from '@/sync/storage';
 import { getSessionForkSource } from '@/utils/sessionFork';
@@ -182,10 +182,8 @@ export const SessionView = React.memo((props: { id: string }) => {
     const rawSideChats = useSideChatSessions(sessionId);
     const sideChatForkSource = session ? getSessionForkSource(session) : null;
     const [activeSideChatId, setActiveSideChatId] = React.useState<string | null>(null);
-    // Optimistically hide a side chat the instant it's closed. The server's
-    // /archive only flips active=false (not lifecycleState), so if the CLI is
-    // already dead the fallback archive wouldn't drop the tab via
-    // useSideChatSessions — this makes the tab disappear immediately regardless.
+    // Optimistically hide a side chat the instant it's closed while the
+    // stop/archive RPC and metadata update settle in the background.
     const [closedSideChatIds, setClosedSideChatIds] = React.useState<Set<string>>(() => new Set());
     const sideChats = React.useMemo(
         () => rawSideChats.filter((s) => !closedSideChatIds.has(s.id)),
@@ -207,9 +205,21 @@ export const SessionView = React.memo((props: { id: string }) => {
     // Best-effort close: kill the agent, fall back to server-side archive.
     const archiveSideChatSession = React.useCallback((id: string) => {
         (async () => {
-            const killed = await sessionKill(id);
-            if (!killed.success) {
-                await sessionArchive(id);
+            // Resolve the side chat itself rather than borrowing the parent
+            // session's machine. They normally match, but forked/imported
+            // sessions are allowed to have a different owner.
+            const sideChat = storage.getState().sessions[id];
+            const result = await sessionStopAndArchive(id, sideChat?.metadata?.machineId);
+            if (!result.success) {
+                console.error(`Failed to archive side chat ${id}: ${result.message || 'Unknown error'}`);
+                // The optimistic close did not stick. Put the tab back so the
+                // user can retry instead of silently hiding a live session.
+                setClosedSideChatIds((prev) => {
+                    if (!prev.has(id)) return prev;
+                    const next = new Set(prev);
+                    next.delete(id);
+                    return next;
+                });
             }
             try {
                 await sync.refreshSessions();

@@ -33,6 +33,7 @@ import {
   sanitizeSessionEnvironment,
   wrapTmuxCommandWithSessionEnvironmentSanitizer,
 } from './sessionEnvironment';
+import { stopTrackedSession } from './stopTrackedSession';
 
 /** Shell-escape a string for safe interpolation into tmux commands. */
 function shellescape(s: string): string {
@@ -756,41 +757,11 @@ export async function startDaemon(): Promise<void> {
       }
     };
 
-    // Stop a session by sessionId or PID fallback
-    const stopSession = (sessionId: string): boolean => {
-      logger.debug(`[DAEMON RUN] Attempting to stop session ${sessionId}`);
-
-      // Try to find by sessionId first
-      for (const [pid, session] of pidToTrackedSession.entries()) {
-        if (session.happySessionId === sessionId ||
-          (sessionId.startsWith('PID-') && pid === parseInt(sessionId.replace('PID-', '')))) {
-
-          if (session.startedBy === 'daemon' && session.childProcess) {
-            try {
-              session.childProcess.kill('SIGTERM');
-              logger.debug(`[DAEMON RUN] Sent SIGTERM to daemon-spawned session ${sessionId}`);
-            } catch (error) {
-              logger.debug(`[DAEMON RUN] Failed to kill session ${sessionId}:`, error);
-            }
-          } else {
-            // For externally started sessions, try to kill by PID
-            try {
-              process.kill(pid, 'SIGTERM');
-              logger.debug(`[DAEMON RUN] Sent SIGTERM to external session PID ${pid}`);
-            } catch (error) {
-              logger.debug(`[DAEMON RUN] Failed to kill external session PID ${pid}:`, error);
-            }
-          }
-
-          pidToTrackedSession.delete(pid);
-          logger.debug(`[DAEMON RUN] Removed session ${sessionId} from tracking`);
-          return true;
-        }
-      }
-
-      logger.debug(`[DAEMON RUN] Session ${sessionId} not found`);
-      return false;
-    };
+    // Stop only processes that this daemon currently owns in its live tracking
+    // map. Never signal a PID recovered from persistence: the OS may have
+    // reused it for an unrelated process after a daemon or host restart.
+    const stopSession = (sessionId: string): boolean =>
+      stopTrackedSession(sessionId, pidToTrackedSession);
 
     // Handle child process exit — preserve session data for resume
     const onChildExited = (pid: number) => {
