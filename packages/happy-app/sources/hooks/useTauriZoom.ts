@@ -26,7 +26,16 @@ export function useTauriZoom() {
         const inTauri = isTauri();
         const root = document.documentElement;
 
+        // Skip the browser zoom class on touch devices (phones/tablets). Even at
+        // BROWSER_APP_ZOOM === 1 the class sets `overflow: hidden` on <html> and
+        // `height: 100vh` on <body> (theme.css). On mobile browsers 100vh is the
+        // *large* viewport and does not shrink when the on-screen keyboard opens,
+        // and the hidden overflow prevents scrolling to reveal the composer — so
+        // the input ends up below the visible viewport while typing.
+        const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
+
         if (!inTauri) {
+            if (isTouchDevice) return;
             root.style.setProperty('--happy-app-zoom', getBrowserAppZoomValue());
             root.classList.add(WEB_ZOOM_CLASS);
             return () => {
