@@ -173,4 +173,18 @@ export interface TransportHandler {
    * @returns Timeout in milliseconds (default: 500)
    */
   getIdleTimeout?(): number;
+
+  /**
+   * Whether to treat the ACP `session/prompt` response as the authoritative
+   * end-of-turn signal and end the turn as soon as it resolves, instead of
+   * waiting for the idle chunk-gap heuristic.
+   *
+   * Enable for agents whose prompt() reliably resolves only after all
+   * session/update notifications for the turn (e.g. Copilot). Agents that may
+   * stream updates after responding to prompt() should leave this false so the
+   * idle heuristic governs turn completion.
+   *
+   * @returns true to end the turn on prompt() resolution (default: false)
+   */
+  endsTurnOnPromptResolution?(): boolean;
 }

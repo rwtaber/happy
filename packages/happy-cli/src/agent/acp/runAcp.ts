@@ -4,7 +4,7 @@ import { ApiClient } from '@/api/api';
 import type { ApiSessionClient } from '@/api/apiSession';
 import type { AgentMessage } from '@/agent/core';
 import { AcpBackend, type AcpPermissionHandler } from './AcpBackend';
-import { DefaultTransport } from '@/agent/transport';
+import { DefaultTransport, copilotTransport, type TransportHandler } from '@/agent/transport';
 import { AcpSessionManager } from './AcpSessionManager';
 import type { SessionEnvelope } from '@slopus/happy-wire';
 import { logger } from '@/ui/logger';
@@ -436,14 +436,33 @@ type PendingTurn = {
   timeout: NodeJS.Timeout;
 };
 
-function resolveSessionFlavor(agentName: string): 'gemini' | 'opencode' | 'acp' {
+function resolveSessionFlavor(agentName: string): 'gemini' | 'opencode' | 'copilot' | 'acp' {
   if (agentName === 'gemini') {
     return 'gemini';
   }
   if (agentName === 'opencode') {
     return 'opencode';
   }
+  if (agentName === 'copilot') {
+    return 'copilot';
+  }
   return 'acp';
+}
+
+/**
+ * Transport handlers for agents reached through this generic runner.
+ *
+ * Only agents whose ACP behaviour actually differs from the default need an
+ * entry. Gemini is absent on purpose: its handler is wired through the
+ * dedicated `createGeminiBackend` factory that `happy gemini` uses, and
+ * attaching it here would change `happy acp gemini` too.
+ */
+const ACP_TRANSPORT_HANDLERS: Record<string, TransportHandler> = {
+  copilot: copilotTransport,
+};
+
+function resolveTransportHandler(agentName: string): TransportHandler {
+  return ACP_TRANSPORT_HANDLERS[agentName] ?? new DefaultTransport(agentName);
 }
 
 export async function runAcp(opts: {
@@ -543,7 +562,7 @@ export async function runAcp(opts: {
     args: opts.args,
     mcpServers,
     permissionHandler,
-    transportHandler: new DefaultTransport(opts.agentName),
+    transportHandler: resolveTransportHandler(opts.agentName),
     verbose,
   });
 

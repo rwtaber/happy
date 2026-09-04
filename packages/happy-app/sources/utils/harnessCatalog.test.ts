@@ -93,6 +93,40 @@ describe('harness catalog', () => {
         }).map((harness) => harness.key)).toEqual(['claude', 'codex']);
     });
 
+    it('never lists Copilot without an explicit installation report', () => {
+        // Absent field: reported by a CLI predating copilot detection, which
+        // must read as "not installed" rather than the permissive default.
+        expect(listAvailableHarnesses({
+            availability: { claude: true },
+            happyAgentAvailable: false,
+            selected: 'copilot',
+        }).map((harness) => harness.key)).toEqual(['claude']);
+
+        expect(listAvailableHarnesses({
+            availability: { claude: true, copilot: false },
+            happyAgentAvailable: false,
+            selected: 'copilot',
+        }).map((harness) => harness.key)).toEqual(['claude']);
+
+        // And it is absent from the no-capabilities fallback too.
+        expect(listAvailableHarnesses({
+            availability: null,
+            happyAgentAvailable: false,
+            selected: 'copilot',
+        }).map((harness) => harness.key)).toEqual(['claude', 'codex']);
+    });
+
+    it('lists Copilot after Antigravity once its CLI is reported', () => {
+        const harnesses = listAvailableHarnesses({
+            availability: { claude: true, codex: true, agy: true, copilot: true },
+            happyAgentAvailable: true,
+            selected: 'claude',
+        });
+
+        expect(harnesses.map((harness) => harness.key)).toEqual(['claude', 'codex', 'agy', 'copilot', 'rig']);
+        expect(harnesses.find((harness) => harness.key === 'copilot')?.name).toBe('Copilot');
+    });
+
     it('falls back to the whole catalog when a machine reports no capabilities', () => {
         expect(listAvailableHarnesses({
             availability: null,

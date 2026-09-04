@@ -4,6 +4,7 @@ import { sortPermissionModes } from '@/utils/permissionModeLabels';
 import { compareVersionsWithPrerelease, isWellFormedVersion } from '@/utils/versionUtils';
 import { CLI_VERSION_WITH_AUTO, getCodeAgentDefaults } from '@/sync/agentDefaults';
 export { CLI_VERSION_WITH_AUTO } from '@/sync/agentDefaults';
+import { COPILOT_MODE_AGENT, COPILOT_MODE_AUTOPILOT, COPILOT_MODE_PLAN } from '@/utils/copilotModes';
 import {
     getRigCurrentModel,
     getRigModels,
@@ -274,6 +275,19 @@ export function filterPermissionModesForCli<T extends ModeOption>(
     return modes.filter((mode) => modeSupportedByCli(mode, cliVersion));
 }
 
+// Copilot's three ACP session modes, keyed by the protocol ids a session
+// reports in metadata.operatingModes — so this pre-session list and the live
+// one agree. Descriptions are Copilot's own wording for each mode. Untranslated
+// because these are read from the protocol rather than authored here; a live
+// session shows whatever descriptions Copilot itself sends.
+export function getCopilotPermissionModes(_translate: Translate): PermissionMode[] {
+    return [
+        { key: COPILOT_MODE_AGENT, name: 'Agent', description: 'Default agent mode for conversational interactions' },
+        { key: COPILOT_MODE_PLAN, name: 'Plan', description: 'Plan mode for creating and executing multi-step plans' },
+        { key: COPILOT_MODE_AUTOPILOT, name: 'Autopilot', description: 'Runs until the task is complete without asking (experimental)' },
+    ];
+}
+
 export function getHardcodedPermissionModes(flavor: AgentFlavor, translate: Translate): PermissionMode[] {
     if (flavor === 'codex') {
         return getCodexPermissionModes(translate);
@@ -286,6 +300,9 @@ export function getHardcodedPermissionModes(flavor: AgentFlavor, translate: Tran
     }
     if (flavor === 'agy') {
         return getAgyPermissionModes(translate);
+    }
+    if (flavor === 'copilot') {
+        return getCopilotPermissionModes(translate);
     }
     return getClaudePermissionModes(translate);
 }
@@ -313,6 +330,23 @@ export function getAgyModelModes(): ModelMode[] {
     ];
 }
 
+// Fallback list for the composer before a live ACP session reports
+// metadata.models, which then takes over via getAvailableModels. Copilot
+// chooses server-side under `auto`, so that leads; the rest are the models
+// Copilot currently exposes. A stale entry here is harmless — it is only ever
+// shown pre-session, and the live catalog replaces the whole list.
+export function getCopilotModelModes(): ModelMode[] {
+    return [
+        { key: 'auto', name: 'Auto', description: 'let Copilot pick the model' },
+        { key: 'claude-opus-5', name: 'Claude Opus 5', description: null },
+        { key: 'claude-sonnet-5', name: 'Claude Sonnet 5', description: null },
+        { key: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', description: 'fast & efficient' },
+        { key: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', description: null },
+        { key: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', description: null },
+        { key: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', description: null },
+    ];
+}
+
 export function getHardcodedModelModes(flavor: AgentFlavor, _translate: Translate): ModelMode[] {
     if (flavor === 'codex') {
         return getCodexModelModes();
@@ -325,6 +359,9 @@ export function getHardcodedModelModes(flavor: AgentFlavor, _translate: Translat
     }
     if (flavor === 'agy') {
         return getAgyModelModes();
+    }
+    if (flavor === 'copilot') {
+        return getCopilotModelModes();
     }
     return getClaudeModelModes();
 }
@@ -520,9 +557,17 @@ export function getCodexEffortLevels(modelKey?: string | null): EffortLevel[] {
     );
 }
 
+// Copilot forwards effort to whichever model it selected, and its ACP config
+// accepts the same scale Claude publishes, so the Claude ladder is reused
+// rather than duplicated.
+export function getCopilotEffortLevels(): EffortLevel[] {
+    return effortLevels(CLAUDE_EFFORTS);
+}
+
 export function getHardcodedEffortLevels(flavor: AgentFlavor): EffortLevel[] {
     if (flavor === 'claude') return getClaudeEffortLevels();
     if (flavor === 'codex') return getCodexEffortLevels();
+    if (flavor === 'copilot') return getCopilotEffortLevels();
     return [];
 }
 
@@ -552,6 +597,9 @@ export function getEffortLevelsForModel(
     }
     if (flavor === 'codex') {
         return getCodexEffortLevels(modelKey);
+    }
+    if (flavor === 'copilot') {
+        return getCopilotEffortLevels();
     }
     return [];
 }

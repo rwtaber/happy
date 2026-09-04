@@ -25,6 +25,7 @@ import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { useSetting } from '@/sync/storage';
 import { hackMode, hackModes } from '@/sync/modeHacks';
 import { getPermissionModeMenuLabel, getPermissionModeShortLabel } from '@/utils/permissionModeLabels';
+import { getHarnessName } from '@/utils/harnessCatalog';
 import { getUsageLimitDisplayPercentage, getUsageLimitRows, formatUsageLimitResetTime, type UsageLimitsLike } from '@/utils/sessionStatusBar';
 import { compactCount } from '@/utils/rigGitLineChanges';
 import { Theme } from '@/theme';
@@ -109,7 +110,7 @@ interface AgentInputProps {
     /** Plan quota windows from agent state, for the week stat and its popup. */
     sessionStatusUsageLimits?: UsageLimitsLike | null;
     onFileViewerPress?: () => void;
-    agentType?: 'claude' | 'codex' | 'gemini' | 'openclaw' | 'agy';
+    agentType?: 'claude' | 'codex' | 'gemini' | 'openclaw' | 'copilot' | 'agy';
     onAgentClick?: () => void;
     machineName?: string | null;
     onMachineClick?: () => void;
@@ -1490,13 +1491,11 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                     fontWeight: '600',
                                     ...Typography.default('semiBold'),
                                 }}>
-                                    {props.agentType === 'claude'
-                                        ? t('agentInput.agent.claude')
-                                        : props.agentType === 'codex'
-                                            ? t('agentInput.agent.codex')
-                                            : props.agentType === 'openclaw'
-                                                ? t('agentInput.agent.openclaw')
-                                                : t('agentInput.agent.gemini')}
+                                    {/* Read the label from the harness catalog rather than a
+                                        per-flavor chain: these are product names, identical in
+                                        every language, and a chain ending in a fallback silently
+                                        mislabels every harness added after it. */}
+                                    {getHarnessName(props.agentType ?? 'claude')}
                                 </Text>
                             </Pressable>
                         )}

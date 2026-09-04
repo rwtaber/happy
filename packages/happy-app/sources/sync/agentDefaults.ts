@@ -1,7 +1,8 @@
 import * as z from 'zod';
 import { compareVersionsWithPrerelease, isWellFormedVersion } from '@/utils/versionUtils';
+import { COPILOT_MODE_AUTOPILOT } from '@/utils/copilotModes';
 
-export const agentKeys = ['claude', 'codex', 'gemini', 'openclaw', 'agy'] as const;
+export const agentKeys = ['claude', 'codex', 'gemini', 'openclaw', 'copilot', 'agy'] as const;
 export type AgentKey = typeof agentKeys[number];
 
 export const AgentDefaultOverrideSchema = z.object({
@@ -15,6 +16,7 @@ export const AgentDefaultOverridesSchema = z.object({
     codex: AgentDefaultOverrideSchema.optional(),
     gemini: AgentDefaultOverrideSchema.optional(),
     openclaw: AgentDefaultOverrideSchema.optional(),
+    copilot: AgentDefaultOverrideSchema.optional(),
     agy: AgentDefaultOverrideSchema.optional(),
 }).passthrough().default({});
 
@@ -36,6 +38,11 @@ const codeAgentDefaults: Record<AgentKey, AgentDefaultConfig> = {
     codex: { permissionMode: 'auto', modelMode: 'gpt-5.6-sol', effortLevel: 'medium' },
     gemini: { permissionMode: 'default', modelMode: 'gemini-2.5-pro', effortLevel: null },
     openclaw: { permissionMode: 'default', modelMode: 'default', effortLevel: null },
+    // Copilot negotiates model and mode over ACP rather than CLI flags, so
+    // these are only what the composer shows before a session reports its own
+    // catalog. `auto` lets Copilot pick the model; the permission mode is the
+    // ACP session-mode id so it matches metadata.operatingModes in-session.
+    copilot: { permissionMode: COPILOT_MODE_AUTOPILOT, modelMode: 'auto', effortLevel: 'medium' },
     agy: { permissionMode: 'default', modelMode: 'Gemini 3.1 Pro (High)', effortLevel: null },
 };
 
@@ -60,7 +67,7 @@ function resolveCodeDefaultPermissionMode(
 }
 
 export function normalizeAgentKey(flavor: string | null | undefined): AgentKey {
-    if (flavor === 'codex' || flavor === 'gemini' || flavor === 'openclaw' || flavor === 'agy') {
+    if (flavor === 'codex' || flavor === 'gemini' || flavor === 'openclaw' || flavor === 'copilot' || flavor === 'agy') {
         return flavor;
     }
     return 'claude';

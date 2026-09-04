@@ -421,8 +421,11 @@ export async function startDaemon(): Promise<void> {
 
           // Construct command for the CLI
           const cliPath = join(projectPath(), 'dist', 'index.mjs');
-          // Determine agent command - support claude, codex, gemini, openclaw, and agy
-          const agent = options.agent === 'gemini' ? 'gemini' : (options.agent === 'codex' ? 'codex' : (options.agent === 'openclaw' ? 'openclaw' : (options.agent === 'agy' ? 'agy' : 'claude')));
+          // Determine agent command. Anything unrecognised falls back to
+          // claude, matching this path's long-standing behaviour (the
+          // non-tmux path below rejects unknown agents explicitly instead).
+          const spawnableAgents = ['claude', 'codex', 'gemini', 'openclaw', 'copilot', 'agy'] as const;
+          const agent = spawnableAgents.find((candidate) => candidate === options.agent) ?? 'claude';
           const resumeId = agent === 'claude'
             ? options.resumeClaudeSessionId
             : (agent === 'codex' ? options.resumeCodexThreadId : undefined);
@@ -517,7 +520,8 @@ export async function startDaemon(): Promise<void> {
         if (!useTmux) {
           logger.debug(`[DAEMON RUN] Using regular process spawning`);
 
-          // Construct arguments for the CLI - support claude, codex, and gemini
+          // Construct arguments for the CLI - support claude, codex, gemini,
+          // openclaw, copilot and agy
           let agentCommand: string;
           switch (options.agent) {
             case 'claude':
@@ -532,6 +536,9 @@ export async function startDaemon(): Promise<void> {
               break;
             case 'openclaw':
               agentCommand = 'openclaw';
+              break;
+            case 'copilot':
+              agentCommand = 'copilot';
               break;
             case 'agy':
               agentCommand = 'agy';
